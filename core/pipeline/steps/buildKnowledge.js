@@ -1,37 +1,37 @@
 export async function buildKnowledge(context) {
 
-    const info = context.metadata.video;
-  
-    context.knowledge = {
-  
-      type: "youtube",
-  
-      title: info.title,
-  
-      summary: context.analysis.summary,
-  
-      keyPoints: context.analysis.keyPoints ?? [],
-  
-      tags: context.analysis.tags ?? [],
-  
-      ideas: context.analysis.ideas ?? [],
-  
-      tasks: context.analysis.tasks ?? [],
-  
-      rawContent: context.transcript ?? null,
+  const source = context.metadata.source;
 
-      source: {
-  
-        url: context.input.url,
-  
-        author: info.channel,
-  
-        duration: info.duration,
-  
-      },
-  
-    };
-  
-    return context;
-  
-  }
+  context.knowledge = {
+
+    type: source.type,
+
+    title: source.title,
+
+    summary: context.analysis.summary,
+
+    keyPoints: context.analysis.keyPoints ?? [],
+
+    tags: context.analysis.tags ?? [],
+
+    ideas: context.analysis.ideas ?? [],
+
+    tasks: context.analysis.tasks ?? [],
+
+    rawContent: context.transcript ?? null,
+
+    source: {
+
+      url: source.url,
+
+      author: source.author,
+
+      duration: source.duration,
+
+    },
+
+  };
+
+  return context;
+
+}

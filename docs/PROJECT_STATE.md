@@ -9,6 +9,11 @@
 - Tasks (basic create/list/complete, stored in the Memory table)
 - Keyword-based Knowledge search
 - Git & GitHub set up
+- **Knowledge Chunks foundation (chunking + embeddings + pgvector) — migration `0002` applied, wired live**
+  - `knowledge.raw_content` captured from the YouTube transcript and persisted through `knowledgeService.js` / `supabaseKnowledgeDriver.js`
+  - Chunks + embeddings built and stored in `knowledge_chunks` via `knowledgeChunkService.js` after every successful `saveKnowledge()` call
+  - Chunk-based RAG (`match_knowledge_chunks`) answers Telegram knowledge questions first, with automatic fallback to the original whole-document search when no chunks are found or a step fails
+  - Covered by `scripts/test-chunk-text.js`, `scripts/test-embedding-batch.js`, `scripts/test-knowledge-chunk-service.js`, `scripts/test-knowledge-chunk-chat.js`
 
 ## In Progress
 
@@ -18,23 +23,19 @@
   - Service layer (`knowledgeService.js`) already updated to use the new driver
   - Rollback path kept intact: JSON drivers and existing JSON knowledge files are untouched
 
-- **Knowledge Chunks foundation (chunking + embeddings + pgvector, for chunk-based RAG)**
-  - Migration SQL finalized (`supabase/migrations/0002_add_knowledge_chunks.sql`): `knowledge.raw_content`, `knowledge_chunks` table, HNSW cosine index, per-operation anon RLS policies, `match_knowledge_chunks` RPC — **not yet applied**
-  - `core/utils/chunkText.js` — pure text-chunking utility (Cyrillic + English, paragraph/sentence-aware boundaries, no external dependency), covered by `scripts/test-chunk-text.js`
-  - `services/ai/embeddingService.js` — additive `createEmbeddings()` batch helper alongside the existing `createEmbedding()`, covered by `scripts/test-embedding-batch.js`
-  - `providers/storage/knowledgeChunkDriver.js` and `services/storage/knowledgeChunkService.js` — insert/delete/load/match chunk rows, and chunk+embed+replace orchestration, covered by `scripts/test-knowledge-chunk-service.js`
-  - **Not yet wired into the YouTube pipeline, Telegram, or chatService.** This is a standalone, locally-tested foundation only — no live behavior has changed.
+- **Universal Knowledge Ingestion foundation (normalized ingestion contract)**
+  - `core/pipeline/steps/loadYouTubeInfo.js` now populates a normalized `context.metadata.source` (`type`, `title`, `url`, `author`, `duration`, `extra`) instead of the YouTube-specific `context.metadata.video`
+  - `core/pipeline/steps/buildKnowledge.js` reads only from `context.metadata.source` — it no longer knows it's building from a YouTube video, so any future source only needs to populate the same contract
+  - Covered by `scripts/test-load-youtube-info.js` (new) and the updated `scripts/test-build-knowledge.js`
+  - Telegram behavior, the saved Knowledge object shape, RAG, Memory, Finance, and the Supabase schema are all unchanged
+  - This milestone only establishes the shared contract for the existing YouTube source — no new source (PDF, Website, Voice, Notes, Instagram) is implemented yet
 
 ## Next
 
 - Inspect/apply RLS + apply the Knowledge migration (`0001`) to Supabase
-- Apply the Knowledge Chunks migration (`0002`) to Supabase
-- Wire `raw_content` capture into the YouTube pipeline and `saveKnowledge()`
-- Wire chunk+embed+persist into the YouTube route (additive call, after `saveKnowledge()`)
-- Chunk-based RAG using `knowledge_chunks`, additive alongside the existing whole-document Knowledge search — not a replacement yet
+- Implement additional source-specific loaders (PDF, Website, Voice, Notes, Instagram transcripts) that populate the same `context.metadata.source` contract and reuse the shared `buildKnowledge` → `saveKnowledge` → chunk/embed pipeline
 - Unified RAG across Knowledge + Memory (replacing the two separate search systems)
 - Dedicated `tasks` table (replacing the Memory-table workaround)
-- Additional sources through the same Pipeline + Knowledge Engine: PDF, Website, Voice, Notes, Instagram transcripts
 - Wire up the existing but unused Inbox classifier (`services/inbox/`)
 
 ## Future

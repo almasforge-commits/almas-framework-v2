@@ -37,6 +37,15 @@ Storage
 - **Supabase**: `finance_transactions`, `memories` (+ `match_memories` RPC for vector similarity search).
 - **JSON files** (`knowledge/youtube/*.json`): Knowledge storage — migration to Supabase is in progress (see `PROJECT_STATE.md`).
 
+### Normalized Ingestion Contract
+
+To let future sources (Instagram transcripts, PDF, Website, Voice, Notes) reuse the same shared pipeline steps, source-specific loader steps populate two generic fields on the pipeline context instead of source-specific ones:
+
+- `context.transcript` — raw extracted text content, regardless of source (YouTube transcript, PDF text, page text, etc.).
+- `context.metadata.source` — normalized metadata: `{ type, title, url, author, duration, extra }`. `type` identifies the source (`"youtube"` today); `duration` is an opaque, source-defined value (YouTube currently provides a pre-formatted string, not raw seconds); `extra` is reserved for source-specific fields that don't fit the shared shape.
+
+Shared steps (`buildKnowledge`, `saveKnowledge`, chunking, embedding) read only from `context.transcript` and `context.metadata.source` — never from a source-specific shape. Today only `loadYouTubeInfo.js` populates this contract (mapping YouTube's `{ title, channel, duration }` into it); adding a new source means writing a new loader step that populates the same contract, with no changes required to `buildKnowledge.js` or anything downstream.
+
 ### Known Gaps vs. Target
 
 - Only YouTube goes through a real Pipeline. Memory-saving and Finance-writing bypass the pipeline pattern and live directly in the Telegram handler.

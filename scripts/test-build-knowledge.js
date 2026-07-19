@@ -21,7 +21,16 @@ function test(name, fn) {
 function baseContext(overrides = {}) {
   return {
     input: { url: "https://youtube.com/watch?v=abc123" },
-    metadata: { video: { title: "Test Video", channel: "Test Channel", duration: 600 } },
+    metadata: {
+      source: {
+        type: "youtube",
+        title: "Test Video",
+        url: "https://youtube.com/watch?v=abc123",
+        author: "Test Channel",
+        duration: 600,
+        extra: {},
+      },
+    },
     analysis: {
       summary: "A short summary.",
       keyPoints: ["point one", "point two"],
@@ -84,6 +93,30 @@ async function run() {
     const result = await buildKnowledge(context);
 
     assert.equal(result, context);
+  });
+
+  await test("buildKnowledge reads type dynamically from context.metadata.source.type", async () => {
+    const context = baseContext({
+      metadata: {
+        source: {
+          type: "pdf",
+          title: "A Document",
+          url: null,
+          author: "Some Author",
+          duration: null,
+          extra: {},
+        },
+      },
+    });
+    const result = await buildKnowledge(context);
+
+    assert.equal(result.knowledge.type, "pdf");
+    assert.equal(result.knowledge.title, "A Document");
+    assert.deepEqual(result.knowledge.source, {
+      url: null,
+      author: "Some Author",
+      duration: null,
+    });
   });
 
   if (process.exitCode) {
