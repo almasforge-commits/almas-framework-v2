@@ -1,0 +1,17 @@
+import 'dotenv/config';
+import { supabase } from './providers/storage/supabase.js';
+import { registerMessageHandler } from './handlers/messageHandler.js';
+
+const { error } = await supabase.from('memories').select('id').limit(1);
+
+if (error) {
+  console.error('❌ Ошибка подключения к Supabase:', error.message);
+} else {
+  console.log('✅ Supabase подключен');
+}
+
+registerMessageHandler();
+
+console.log('🤖 ALMAS Framework Bot запущен...');
+import path from "path";
+
