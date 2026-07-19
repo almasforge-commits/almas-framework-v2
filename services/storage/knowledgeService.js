@@ -1,7 +1,11 @@
 import crypto from "crypto";
 
-import { saveJson } from "../../providers/storage/jsonDriver.js";
-import { loadAllKnowledge } from "../../providers/storage/jsonSearchDriver.js";
+import {
+  insertKnowledge,
+  updateKnowledge,
+  loadAllKnowledge,
+  deleteAllKnowledge as deleteAllKnowledgeRecords,
+} from "../../providers/storage/supabaseKnowledgeDriver.js";
 
 import { validateKnowledge } from "./knowledgeValidator.js";
 import { generateKnowledgeFingerprint } from "./knowledgeFingerprint.js";
@@ -39,13 +43,13 @@ export async function saveKnowledge(data) {
 
     });
 
-    await saveJson(`${knowledge.id}.json`, knowledge);
+    const saved = await updateKnowledge(knowledge.id, knowledge);
 
     return {
       success: true,
       created: false,
       updated: true,
-      knowledge,
+      knowledge: saved,
     };
 
   }
@@ -82,14 +86,20 @@ export async function saveKnowledge(data) {
 
   });
 
-  await saveJson(`${knowledge.id}.json`, knowledge);
+  const saved = await insertKnowledge(knowledge);
 
   return {
     success: true,
     created: true,
     updated: false,
-    knowledge,
+    knowledge: saved,
   };
+
+}
+
+export async function deleteAllKnowledge() {
+
+  return deleteAllKnowledgeRecords();
 
 }
 

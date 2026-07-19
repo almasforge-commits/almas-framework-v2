@@ -1,4 +1,4 @@
-import { loadAllKnowledge } from "../../providers/storage/jsonSearchDriver.js";
+import { loadAllKnowledge } from "../../providers/storage/supabaseKnowledgeDriver.js";
 
 const FIELD_WEIGHTS = {
   title: 10,

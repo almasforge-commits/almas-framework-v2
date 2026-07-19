@@ -21,12 +21,11 @@ import { isYouTubeLink } from "../services/content/youtubeService.js";
 import {
   getAllKnowledge,
   getKnowledgeByIndex,
+  deleteAllKnowledge,
 } from "../services/storage/knowledgeService.js";
 
 import { searchKnowledge } from "../services/search/knowledgeSearchService.js";
 import { askKnowledge } from "../services/chat/chatService.js";
-
-import { deleteAllJson } from "../providers/storage/jsonDriver.js";
 
 import { handleYouTube } from "./routes/youtubeRoute.js";
 
@@ -192,7 +191,7 @@ export function registerMessageHandler() {
     
     // Удалить все знания
     if (text.toLowerCase() === "удалить все знания") {
-      const deleted = await deleteAllJson();
+      const deleted = await deleteAllKnowledge();
     
       await bot.sendMessage(
         chatId,

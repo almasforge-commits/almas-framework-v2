@@ -14,7 +14,15 @@ export async function handleYouTube(chatId, url) {
     return true;
   }
 
-  const saved = await saveKnowledge(result.knowledge);
+  let saved;
+
+  try {
+    saved = await saveKnowledge(result.knowledge);
+  } catch (error) {
+    console.error("Ошибка сохранения знания:", error);
+    await bot.sendMessage(chatId, "❌ Не удалось сохранить знание. Попробуйте позже.");
+    return true;
+  }
 
   const knowledge = saved.knowledge;
 
