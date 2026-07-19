@@ -57,24 +57,32 @@ Purpose: structured knowledge extracted from any content source (currently YouTu
 | source | jsonb — url, author, duration, etc., shape depends on `type` |
 | fingerprint | used for duplicate detection |
 | status | e.g. `approved` |
+| raw_content | nullable text — the full, unprocessed source content (e.g. a YouTube transcript) that `summary`/`key_points`/etc. were derived from. Added in `supabase/migrations/0002_add_knowledge_chunks.sql`, it's the input `chunkText()` splits for `knowledge_chunks`. |
 | created_at / updated_at | timestamps |
 
 Status: table designed in `supabase/migrations/0001_create_knowledge_table.sql`, **not yet applied**. The application code (`knowledgeService.js`, `supabaseKnowledgeDriver.js`) is already written against this schema; until the migration runs, Knowledge is still served from JSON files as a fallback data source in practice.
 
-## Planned
-
 ### `knowledge_chunks`
 
-Purpose: chunked, embedded pieces of a Knowledge item, for RAG.
+Purpose: chunked, embedded pieces of a Knowledge item's `raw_content`, for RAG.
 
-| Field (proposed) | Notes |
+| Field | Notes |
 |---|---|
-| id | |
-| knowledge_id | fk → knowledge.id |
-| content | chunk text |
-| embedding | vector |
-| position | chunk order within the source item |
-| created_at | |
+| id | uuid, primary key |
+| knowledge_id | fk → `knowledge.id`, `on delete cascade` |
+| chunk_index | order of this chunk within its Knowledge item; unique together with `knowledge_id` |
+| content | chunk text, produced by `core/utils/chunkText.js` |
+| token_count | rough heuristic estimate (~4 chars/token), not an exact tokenizer count |
+| embedding | `vector(1536)` — dimension of OpenAI's `text-embedding-3-small`, the same model Memory already uses |
+| created_at | timestamp |
+
+RLS: enabled, with one policy per operation (`select`/`insert`/`update`/`delete`) granted to the `anon` role — no single `for all` policy. Mirrors the confirmed live RLS style already used on `knowledge`.
+
+RPC: `match_knowledge_chunks(query_embedding, match_threshold, match_count)` — cosine similarity search over `knowledge_chunks.embedding` (HNSW index), joined with `knowledge` for title/type/source, so results can be cited back to their source item. `security invoker` (not `security definer`).
+
+Status: designed and finalized in `supabase/migrations/0002_add_knowledge_chunks.sql`, **not yet applied**. Application code (`providers/storage/knowledgeChunkDriver.js`, `services/storage/knowledgeChunkService.js`) is written against this schema but is **not wired into the YouTube pipeline, Telegram, or chatService yet** — it exists as a standalone, tested foundation only. See `PROJECT_STATE.md`.
+
+## Planned
 
 ### `tasks`
 

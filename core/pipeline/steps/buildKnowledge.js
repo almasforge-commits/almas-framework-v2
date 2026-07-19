@@ -18,6 +18,8 @@ export async function buildKnowledge(context) {
   
       tasks: context.analysis.tasks ?? [],
   
+      rawContent: context.transcript ?? null,
+
       source: {
   
         url: context.input.url,

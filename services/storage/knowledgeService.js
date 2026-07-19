@@ -32,6 +32,8 @@ export async function saveKnowledge(data) {
       ideas: data.ideas ?? duplicate.ideas,
       tasks: data.tasks ?? duplicate.tasks,
 
+      rawContent: data.rawContent ?? duplicate.rawContent,
+
       source: {
         ...duplicate.source,
         ...(data.source ?? {}),
@@ -73,6 +75,8 @@ export async function saveKnowledge(data) {
     ideas: data.ideas ?? [],
 
     tasks: data.tasks ?? [],
+
+    rawContent: data.rawContent ?? null,
 
     source: data.source,
 

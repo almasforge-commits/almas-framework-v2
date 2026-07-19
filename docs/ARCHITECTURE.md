@@ -28,8 +28,8 @@ Storage
 
 - **config/** — Telegram bot client, static AI model config.
 - **core/** — pipeline engine (`Pipeline`, `PipelineLogger`), shared context factory, constants, small text/date utilities. Only the YouTube ingestion flow currently runs through a full pipeline: validate input → load video info → load transcript → AI summary → build knowledge.
-- **providers/** — integration boundaries: OpenAI (`askAI`, embeddings), the Supabase client, and JSON file drivers for legacy Knowledge storage (being replaced, see "Migration in progress" below).
-- **services/** — domain logic, grouped by responsibility: `ai/` (embeddings), `analysis/` (AI summarization + normalization), `chat/` (RAG-lite Q&A over Knowledge), `content/` (YouTube metadata + transcript), `finance/` (parsing, categorization, Supabase persistence), `inbox/` (content-type classifier — written but not yet wired into any flow), `search/` (keyword search over Knowledge), `storage/` (Knowledge, Memory, Task persistence), `workflows/` (the YouTube pipeline assembly).
+- **providers/** — integration boundaries: OpenAI (`askAI`, embeddings), the Supabase client, JSON file drivers for legacy Knowledge storage (being replaced, see "Migration in progress" below), and `knowledgeChunkDriver.js` (Supabase I/O for `knowledge_chunks` — insert, delete-by-knowledge-id, load-by-knowledge-id, and the `match_knowledge_chunks` similarity-search RPC; not yet wired into any flow, see `PROJECT_STATE.md`).
+- **services/** — domain logic, grouped by responsibility: `ai/` (embeddings — single-text `createEmbedding()` plus a batch `createEmbeddings()` helper with bounded concurrency), `analysis/` (AI summarization + normalization), `chat/` (RAG-lite Q&A over Knowledge), `content/` (YouTube metadata + transcript), `finance/` (parsing, categorization, Supabase persistence), `inbox/` (content-type classifier — written but not yet wired into any flow), `search/` (keyword search over Knowledge), `storage/` (Knowledge, Memory, Task persistence, plus `knowledgeChunkService.js` — chunk + embed + replace/query knowledge chunks; not yet wired into any flow), `workflows/` (the YouTube pipeline assembly).
 - **handlers/** — Telegram-facing routing. Currently one large message handler plus two extracted route files (`financeRoute.js` for finance reads, `youtubeRoute.js` for YouTube ingestion). Most domains (memory, knowledge, tasks, finance writes) are still routed inline in the main handler rather than in dedicated route files.
 
 ### Current Data Stores
@@ -68,7 +68,7 @@ Telegram / Web / Voice        (interfaces — adapters only, no business logic)
 
 ### What Changes to Get There
 
-1. Every content source (YouTube, PDF, voice, website, note) goes through the same Pipeline shape already proven for YouTube — no parallel mechanisms.
+1. Every content source — YouTube, Instagram transcripts, PDF, Website, Voice, and Notes — goes through the same Pipeline shape already proven for YouTube, feeding the same Knowledge Engine (chunking + embeddings + `knowledge_chunks`, see `DATA_MODEL.md`). No parallel per-source mechanisms.
 2. The Inbox + Classifier pattern becomes the single entry point for free-form input, replacing today's long if/else chain in the message handler.
 3. Knowledge moves fully into Supabase (in progress).
 4. A single RAG layer serves both Knowledge and Memory, replacing the two disconnected search implementations.

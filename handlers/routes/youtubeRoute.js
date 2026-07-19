@@ -2,6 +2,7 @@ import bot from "../../config/bot.js";
 
 import { runYouTubeWorkflow } from "../../services/workflows/youtubeWorkflow.js";
 import { saveKnowledge } from "../../services/storage/knowledgeService.js";
+import { rebuildKnowledgeChunksFromKnowledge } from "../../services/storage/knowledgeChunkService.js";
 
 export async function handleYouTube(chatId, url) {
 
@@ -28,6 +29,12 @@ export async function handleYouTube(chatId, url) {
 
   // Если знание уже существовало — не засоряем чат
   if (saved.updated) {
+
+    try {
+      await rebuildKnowledgeChunksFromKnowledge(knowledge);
+    } catch (error) {
+      console.error("Не удалось перестроить knowledge_chunks:", error);
+    }
 
     await bot.sendMessage(
       chatId,
@@ -59,6 +66,12 @@ export async function handleYouTube(chatId, url) {
   const tags = knowledge.tags.length
     ? knowledge.tags.map(t => `#${t}`).join(" ")
     : "Нет";
+
+  try {
+    await rebuildKnowledgeChunksFromKnowledge(knowledge);
+  } catch (error) {
+    console.error("Не удалось перестроить knowledge_chunks:", error);
+  }
 
   await bot.sendMessage(
     chatId,

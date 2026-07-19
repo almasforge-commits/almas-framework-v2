@@ -26,6 +26,7 @@ import {
 
 import { searchKnowledge } from "../services/search/knowledgeSearchService.js";
 import { askKnowledge } from "../services/chat/chatService.js";
+import { askKnowledgeChunks } from "../services/chat/knowledgeChunkChatService.js";
 
 import { handleYouTube } from "./routes/youtubeRoute.js";
 
@@ -211,6 +212,40 @@ if (text.toLowerCase().startsWith("спроси ")) {
   }
 
   await bot.sendMessage(chatId, "🧠 Думаю...");
+
+  let chunkAnswer = null;
+
+  try {
+    chunkAnswer = await askKnowledgeChunks(question);
+  } catch (error) {
+    console.error("Ошибка chunk-based RAG:", error);
+  }
+
+  if (chunkAnswer) {
+
+    const chunkSources = (chunkAnswer.sources ?? [])
+      .map(source => `• ${source}`)
+      .join("\n");
+
+    await bot.sendMessage(
+      chatId,
+`🧠 Ответ
+
+${chunkAnswer.answer}
+
+━━━━━━━━━━━━━━
+
+📚 Источники
+
+${chunkSources || "Нет"}`
+    );
+
+    return;
+  }
+
+  // Chunk-based RAG found nothing usable — fall back to the existing
+  // whole-document path below, unchanged, without sending "🧠 Думаю..."
+  // again.
 
   const knowledge = await searchKnowledge(question);
 
