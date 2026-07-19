@@ -29,6 +29,7 @@ import { askKnowledge } from "../services/chat/chatService.js";
 import { askKnowledgeChunks } from "../services/chat/knowledgeChunkChatService.js";
 
 import { handleYouTube } from "./routes/youtubeRoute.js";
+import { handleVoiceMessage } from "./routes/voiceRoute.js";
 
 import {
   saveMemory,
@@ -49,6 +50,14 @@ export function registerMessageHandler() {
   bot.on("message", async (msg) => {
 
     const chatId = msg.chat.id;
+
+    // Голосовые сообщения: распознаём и показываем текст пользователю.
+    // Phase 1 — распознанный текст пока не маршрутизируется дальше.
+    if (msg.voice) {
+      await handleVoiceMessage(chatId, msg.voice);
+      return;
+    }
+
     const text = msg.text?.trim();
 
     if (!text) return;
