@@ -1,81 +1,60 @@
 # Roadmap
 
-## Pilot V1
+Development phases. Each phase has a goal, deliverables, and an exit criterion — the condition that means the phase is actually done, not just started.
 
-✔ Pipeline
+## Phase 0 — Foundation ✅ Done
 
-✔ Context
+**Goal:** prove the core loop works end-to-end for one content type.
 
-✔ Telegram Adapter
+- ✅ Git & GitHub
+- ✅ Telegram adapter
+- ✅ YouTube ingestion pipeline (metadata → transcript → AI summary → Knowledge)
+- ✅ Finance tracking (Supabase)
+- ✅ Memory with embeddings (Supabase + vector search)
+- ✅ Tasks (basic, via the Memory table)
 
-✔ YouTube
+**Exit criterion:** a user can send a YouTube link and get back structured knowledge; track expenses/income; save and recall a memory. All true today.
 
-✔ Transcript
+## Phase 1 — Unified Knowledge Layer 🟡 In Progress
 
-✔ Summary
+**Goal:** one real source of truth for Knowledge, ready for RAG.
 
-✔ Knowledge Builder
+- 🟡 Migrate Knowledge storage from JSON files to Supabase (migration SQL written, service/driver code updated, migration not yet applied)
+- ⬜ Knowledge chunking
+- ⬜ Embeddings for Knowledge
+- ⬜ Unified RAG across Knowledge + Memory (currently two separate search systems)
 
-⬜ Memory Engine
+**Exit criterion:** Knowledge lives only in Supabase, is chunked and embedded, and a single retrieval layer answers questions using both Knowledge and Memory.
 
-⬜ Repository
+## Phase 2 — Personal Data Expansion ⬜ Next
 
-⬜ PostgreSQL
+**Goal:** ALMAS accepts more than YouTube links.
 
-⬜ Search
+- ⬜ PDF ingestion through the pipeline
+- ⬜ Voice ingestion through the pipeline
+- ⬜ Website ingestion through the pipeline
+- ⬜ Dedicated Tasks table (replacing the memory-table workaround)
+- ⬜ Health tracking (basic logging)
 
-⬜ QA
+**Exit criterion:** every supported content type flows through the same Pipeline shape; Tasks and Health are first-class entities in Supabase, not repurposed Memory rows.
 
----
+## Phase 3 — Automation & Agents ⬜ Future
 
-## Pilot V2
+**Goal:** ALMAS starts acting, not just remembering.
 
-Структурированная память
+- ⬜ Research agent
+- ⬜ Automation engine (repeatable actions on the user's behalf)
+- ⬜ Additional adapters (e.g. Instagram)
 
-Проекты
+**Exit criterion:** at least one agent can complete a multi-step task autonomously, with an approval gate before anything that changes user data.
 
-Финансы
+## Phase 4 — Multi-Interface ALMAS OS ⬜ Future
 
-Идеи
+**Goal:** ALMAS is no longer "a Telegram bot."
 
-Люди
+- ⬜ Web application
+- ⬜ Voice interface
+- ⬜ Public API
+- ⬜ VPS / Docker deployment
 
-Документы
-
-События
-
----
-
-## Pilot V3
-
-AI Router
-
-Agent System
-
-Vector Search
-
-Analytics
-
-Dashboard
-
----
-
-## ALMAS OS
-
-Web
-
-Mobile
-
-Voice
-
-Calendar
-
-Finance
-
-Projects
-
-Knowledge
-
-Life Model
-
-AI Assistant
+**Exit criterion:** the same core (Pipeline, Knowledge, RAG, Agents) is reachable from at least two interfaces without duplicated business logic.

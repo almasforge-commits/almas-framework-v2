@@ -1,89 +1,77 @@
-# Архитектура
+# Architecture
 
-ALMAS строится как Framework.
+This document describes the architecture as it exists today, and the target architecture ALMAS is moving toward. See `DECISIONS.md` for the accepted decisions this architecture must not contradict.
 
-Не как Telegram Bot.
+## Guiding Rules
 
-Telegram — Adapter.
+- Telegram is an adapter, not the core (D-001).
+- Core has no knowledge of Telegram, or of any specific interface (D-005).
+- Business logic lives in Core/Services, never in a handler (D-006).
+- The Pipeline is the primary mechanism for turning raw input into Knowledge (D-002).
+- Repositories/drivers only save data — no business logic there (D-007).
 
-Архитектура
+## Current Architecture
 
+```
 Telegram
-
-↓
-
-Pipeline
-
-↓
-
-Core
-
-↓
-
-Memory
-
-↓
-
+   ↓
+Handlers / Routes        (Telegram-specific, thin)
+   ↓
+Services                 (business logic, interface-agnostic)
+   ↓
+Providers                (OpenAI, Supabase, JSON — integration boundaries)
+   ↓
 Storage
+```
 
----
+### Current Modules
 
-Core ничего не знает о Telegram.
+- **config/** — Telegram bot client, static AI model config.
+- **core/** — pipeline engine (`Pipeline`, `PipelineLogger`), shared context factory, constants, small text/date utilities. Only the YouTube ingestion flow currently runs through a full pipeline: validate input → load video info → load transcript → AI summary → build knowledge.
+- **providers/** — integration boundaries: OpenAI (`askAI`, embeddings), the Supabase client, and JSON file drivers for legacy Knowledge storage (being replaced, see "Migration in progress" below).
+- **services/** — domain logic, grouped by responsibility: `ai/` (embeddings), `analysis/` (AI summarization + normalization), `chat/` (RAG-lite Q&A over Knowledge), `content/` (YouTube metadata + transcript), `finance/` (parsing, categorization, Supabase persistence), `inbox/` (content-type classifier — written but not yet wired into any flow), `search/` (keyword search over Knowledge), `storage/` (Knowledge, Memory, Task persistence), `workflows/` (the YouTube pipeline assembly).
+- **handlers/** — Telegram-facing routing. Currently one large message handler plus two extracted route files (`financeRoute.js` for finance reads, `youtubeRoute.js` for YouTube ingestion). Most domains (memory, knowledge, tasks, finance writes) are still routed inline in the main handler rather than in dedicated route files.
 
-Core ничего не знает о WhatsApp.
+### Current Data Stores
 
-Core работает только с Context.
+- **Supabase**: `finance_transactions`, `memories` (+ `match_memories` RPC for vector similarity search).
+- **JSON files** (`knowledge/youtube/*.json`): Knowledge storage — migration to Supabase is in progress (see `PROJECT_STATE.md`).
 
-Все платформы являются адаптерами.
+### Known Gaps vs. Target
 
----
+- Only YouTube goes through a real Pipeline. Memory-saving and Finance-writing bypass the pipeline pattern and live directly in the Telegram handler.
+- The Inbox classifier exists as code (`services/inbox/`) but nothing calls it yet.
+- Knowledge search (keyword-based, over JSON/Supabase) and Memory search (vector-based, over Supabase) are two separate systems with no unified retrieval layer.
+- Tasks are stored inside the generic `memories` table rather than as a first-class entity.
 
-Основные модули
+## Target Architecture
 
-core/
+```
+Telegram / Web / Voice        (interfaces — adapters only, no business logic)
+        ↓
+      Inbox                   (single entry point for anything not a recognized command)
+        ↓
+    Classifier                (detect content type: youtube / pdf / website / voice / note / task / idea)
+        ↓
+     Pipeline                 (validate → extract → analyze → structure)
+        ↓
+     Knowledge                (unified object, any source type)
+        ↓
+     Supabase                 (single source of truth: Knowledge, Memory, Finance, Tasks, Health, Automation)
+        ↓
+       RAG                    (retrieval across Knowledge + Memory, unified)
+        ↓
+      OpenAI                  (reasoning / generation)
+        ↓
+   Interface response         (back through the originating adapter)
+```
 
-pipeline/
+### What Changes to Get There
 
-memory/
-
-providers/
-
-services/
-
-config/
-
----
-
-Pipeline состоит из последовательности Step.
-
-Каждый Step делает только одну задачу.
-
-Например
-
-validateInput
-
-↓
-
-loadYoutube
-
-↓
-
-loadTranscript
-
-↓
-
-generateSummary
-
-↓
-
-buildKnowledge
-
-↓
-
-saveKnowledge
-
-Каждый Step получает Context.
-
-Каждый Step возвращает Context.
-
-Никаких глобальных зависимостей.
+1. Every content source (YouTube, PDF, voice, website, note) goes through the same Pipeline shape already proven for YouTube — no parallel mechanisms.
+2. The Inbox + Classifier pattern becomes the single entry point for free-form input, replacing today's long if/else chain in the message handler.
+3. Knowledge moves fully into Supabase (in progress).
+4. A single RAG layer serves both Knowledge and Memory, replacing the two disconnected search implementations.
+5. Tasks get a dedicated table instead of reusing `memories`.
+6. Web and Voice become additional adapters calling the same Core — no logic duplicated per interface.
+7. An Agent layer (Research, Automation) sits on top of the same Core services, with explicit approval gates before any action that changes user data.

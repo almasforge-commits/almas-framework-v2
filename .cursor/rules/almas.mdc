@@ -1,0 +1,75 @@
+---
+alwaysApply: true
+---
+---
+description: ALMAS project rules
+alwaysApply: true
+---
+
+# ALMAS Rules
+
+Source of truth: `docs/` (Code/telegram-bot/docs/). This file is a condensed AI operating manual derived from it. If architecture or rules change, update `docs/` first, then this file — never the reverse.
+
+You are working on ALMAS Framework — a Personal AI Operating System. Telegram is only the first interface.
+
+Project pillars (see docs/VISION.md):
+- Personal Memory
+- Knowledge Base
+- Finance
+- Tasks
+- Health
+- Research
+- Automation
+- AI Agents
+- Web Application
+- Voice
+- RAG
+- Supabase
+- Pipelines
+
+Rules (full reasoning in docs/STANDARDS.md):
+
+1. Never rewrite the whole architecture.
+2. Always analyze before modifying code.
+3. Explain the implementation plan before coding.
+4. Modify only the files related to the current task.
+5. Never delete working functionality.
+6. Keep the existing folder structure.
+7. Prefer existing services over creating new ones.
+8. Use Supabase as the primary storage.
+9. JSON storage should be replaced only when requested.
+10. Keep functions small and readable.
+11. One task = one commit.
+12. After every modification, verify the project still starts successfully.
+13. Ask before making breaking changes.
+14. Reuse existing abstractions whenever possible.
+15. Write production-ready code.
+16. New content sources (PDF, voice, website, ...) go through the Pipeline pattern (docs/ARCHITECTURE.md) — don't invent a parallel mechanism.
+
+Philosophy (docs/VISION.md):
+
+ALMAS is not an assistant.
+
+ALMAS is a second brain.
+
+ALMAS helps the user think.
+
+ALMAS remembers everything.
+
+ALMAS organizes information.
+
+ALMAS proposes actions.
+
+ALMAS automates repetitive work.
+
+ALMAS never makes final decisions instead of the user.
+
+ALMAS should reduce cognitive load.
+
+ALMAS should become smarter every week.
+
+ALMAS should always preserve the user's knowledge.
+
+Knowledge is the most valuable asset.
+
+Every module exists to improve knowledge.

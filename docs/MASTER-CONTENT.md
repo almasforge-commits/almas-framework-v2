@@ -1,76 +1,38 @@
-# ALMAS Framework
+# ALMAS Documentation — Entry Point
 
-## Цель
+## Documentation Layers
 
-ALMAS — это не Telegram-бот.
+ALMAS has two documentation layers:
 
-ALMAS — это персональная операционная система (Personal Operating System), которая хранит, анализирует и использует информацию о жизни пользователя.
+1. **`docs/`** (this folder) — human documentation. **This is the source of truth** for the project's mission, architecture, and rules.
+2. **`.cursor/rules/`** — AI operating manual. A condensed set of rules mechanically derived from `docs/`, used by AI coding agents (like Cursor) to act consistently with this documentation.
 
-Telegram — только первый интерфейс взаимодействия.
+Synchronization is one-directional: **`docs/` → `.cursor/rules/`, never the reverse.** If the architecture or rules change, update the relevant file in `docs/` first, then update the matching file in `.cursor/rules/` to reflect it.
 
-В будущем могут появиться:
+## Source of Truth Order
 
-- Web
-- Mobile
-- Desktop
-- API
-- Voice
+1. **Code** — what is actually running, always wins in a factual dispute.
+2. **`docs/`** — this documentation, the intended design and rules.
+3. **`.cursor/rules/`** — derived from `docs/`, for AI-agent behavior.
+4. **Chat conversation** — lowest priority; never overrides the above.
 
-Ядро остается одинаковым.
+## Reading Order
 
----
+1. [VISION.md](./VISION.md) — mission and long-term direction
+2. [ARCHITECTURE.md](./ARCHITECTURE.md) — current and target system design
+3. [DECISIONS.md](./DECISIONS.md) — accepted architectural decisions (unchanged, still final)
+4. [STANDARDS.md](./STANDARDS.md) — engineering rules for humans and AI agents
+5. [ROADMAP.md](./ROADMAP.md) — development phases
+6. [DATA_MODEL.md](./DATA_MODEL.md) — Supabase entities, existing and planned
+7. [PROJECT_STATE.md](./PROJECT_STATE.md) — what's done, in progress, next, and future
+8. [CHAT_RULES.md](./CHAT_RULES.md) — how ALMAS talks to the end user
 
-## Главная идея
+## Also in This Folder (historical / supporting, unchanged by this rewrite)
 
-ALMAS НЕ хранит сообщения.
+- [README.md](./README.md) — one-line project description
+- [FEATURES.md](./FEATURES.md), [FEATURE-003.md](./FEATURE-003.md) — historical feature notes
+- [CHANGELOG.md](./CHANGELOG.md) — version history
 
-ALMAS хранит факты.
+## Note
 
-Любое сообщение превращается в структурированные знания.
-
-Например
-
-Сообщение
-
-"Купили продукты за 420000 донгов"
-
-становится
-
-Финансы
-Расход
-
-Покупки
-Продукты
-
-Дата
-
-Проект (если есть)
-
----
-
-## Источник истины
-
-Источник истины проекта:
-
-1. Код
-2. Документация
-3. Потом чат
-
-Не наоборот.
-
----
-
-## Цель Pilot V1
-
-Получить первую рабочую версию ALMAS Framework.
-
-Она должна уметь
-
-- принимать YouTube
-- получать транскрипт
-- делать анализ
-- строить Knowledge
-- сохранять память
-- отвечать на вопросы по памяти
-
-После Pilot V1 начинается развитие ALMAS OS.
+The top-level `Documents/` folder (outside `Code/telegram-bot/`) is an earlier, partially-empty draft area that predates this `docs/` folder. It is not part of the documentation layers described above.
