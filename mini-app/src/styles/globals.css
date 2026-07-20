@@ -1,0 +1,50 @@
+:root {
+  --tg-bg: #ffffff;
+  --tg-secondary-bg: #f4f4f5;
+  --tg-text: #111827;
+  --tg-hint: #6b7280;
+  --tg-link: #2563eb;
+  --tg-button: #2563eb;
+  --tg-button-text: #ffffff;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *:focus-visible {
+    outline: 2px solid var(--tg-link);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .app-card {
+    @apply rounded-2xl border border-black/5 bg-tg-secondary p-4;
+  }
+
+  .tap-target {
+    @apply min-h-11 min-w-11;
+  }
+}

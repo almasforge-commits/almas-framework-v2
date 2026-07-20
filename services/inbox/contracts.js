@@ -1,26 +1,21 @@
 // Shared, pure vocabulary for the AI Intent Analyzer / Action Planner
-// pipeline. No external dependency, no side effects, no imports of
-// Telegram/Supabase/Finance/Memory/Tasks/Knowledge services — this file
-// is the single source of truth for the contract shape every layer
-// (deterministic detector, AI providers, validator, orchestrator) reads
-// and writes against.
+// pipeline. Domain membership comes from config/domainRegistry.js;
+// ACTION_TYPES remain the closed router vocabulary derived from that
+// registry. No Telegram/Supabase/Finance/Memory/Tasks/Knowledge service
+// imports.
+
+import {
+  listRouterActionTypes,
+  isKnownRouterActionType,
+  getDomainIdForActionType,
+} from "../../config/domainRegistry.js";
 
 export const LANGUAGES = ["ru", "en", "kk", "mixed", "unknown"];
 
-// Fixed, closed set — "Do not allow free-form action names." Adding a
-// new action type means updating this list AND actionValidator.js
-// AND (if relevant) deterministicIntentDetector.js together.
-export const ACTION_TYPES = [
-  "finance_expense",
-  "finance_income",
-  "task_create",
-  "memory_save",
-  "knowledge_query",
-  "search",
-  "chat",
-  "system_command",
-  "unknown",
-];
+// Fixed, closed set — derived from the Domain Registry's relatedActionTypes
+// in a stable order. Adding a new action type means updating the registry
+// (and actionValidator / deterministic detector as needed).
+export const ACTION_TYPES = [...listRouterActionTypes()];
 
 // Generic, fixed payload slots. Every action uses whichever subset of
 // these applies to its type (e.g. finance_expense uses amount/currency/
@@ -54,8 +49,10 @@ export function isValidLanguage(language) {
 }
 
 export function isValidActionType(type) {
-  return ACTION_TYPES.includes(type);
+  return isKnownRouterActionType(type);
 }
+
+export { getDomainIdForActionType };
 
 export function isDestructiveAction(action) {
   return (

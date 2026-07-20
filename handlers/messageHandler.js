@@ -4,6 +4,7 @@ import {
   looksLikeFinanceAttempt,
 } from "../services/finance/financeParser.js";
 import { normalizeCommandText } from "../core/utils/normalizeCommandText.js";
+import { normalizeUserText } from "../core/utils/normalizeUserText.js";
 import { isMeaninglessShortInput } from "../core/utils/isMeaninglessShortInput.js";
 
 import {
@@ -58,6 +59,11 @@ import {
 } from "../services/inbox/routingDecisionService.js";
 import { isAiRouterExecutionActive } from "../config/aiRouter.js";
 import { buildRequestKey } from "../core/utils/buildRequestKey.js";
+import { buildActorFromTelegram } from "../services/inbox/inboxContracts.js";
+import {
+  mapInputSourceToInboxSourceType,
+  startInboxReceivedObservation,
+} from "../services/inbox/inboxObservation.js";
 import { sendAiExecutionConfirmations } from "./routes/aiExecutionRoute.js";
 
 import {
@@ -137,7 +143,36 @@ export async function routeText(chatId, text, from, options = {}) {
   }
 
   const requestKey = buildRequestKey({ chatId, messageId, text });
-  const routingContext = { inputSource, chatId, from, requestKey };
+  const sourceType = mapInputSourceToInboxSourceType(inputSource);
+  const actor = buildActorFromTelegram(from, chatId);
+  const inboxNormalizedText = normalizeUserText(text);
+
+  // Unified Inbox shadow observation (disabled by default). Starts the
+  // per-requestKey received→analysis→execution chain without awaiting —
+  // Telegram replies and domain routing must never wait on Inbox I/O.
+  // Menu / meaningless-input paths above never reach this hook.
+  startInboxReceivedObservation({
+    requestKey,
+    sourceType,
+    actor,
+    originalText: text,
+    normalizedText: inboxNormalizedText,
+    metadata: {
+      inputSource,
+      messageId: messageId ?? null,
+    },
+  });
+
+  const routingContext = {
+    inputSource,
+    chatId,
+    from,
+    requestKey,
+    sourceType,
+    actor,
+    normalizedText: inboxNormalizedText,
+    originalText: text,
+  };
 
   // AI Intent Analyzer / Action Planner — execution-ownership boundary.
   // Runs only after the menu fast path above, so navigation labels never

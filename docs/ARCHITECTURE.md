@@ -26,16 +26,37 @@ Storage
 
 ### Current Modules
 
-- **config/** — Telegram bot client, static AI model config, and `webapp.js` (`ALMAS_WEB_APP_URL`, safe unset default, no `.env` change required).
+- **config/** — Telegram bot client, static AI model config, `webapp.js`, `inbox.js` (Inbox flags), and `domainRegistry.js` (single source of truth for ALMAS domains).
 - **core/** — pipeline engine (`Pipeline`, `PipelineLogger`), shared context factory, constants, small text/date utilities. Only the YouTube ingestion flow currently runs through a full pipeline: validate input → load video info → load transcript → AI summary → build knowledge.
 - **providers/** — integration boundaries: OpenAI (`askAI`, embeddings), the Supabase client, JSON file drivers for legacy Knowledge storage (being replaced, see "Migration in progress" below), and `knowledgeChunkDriver.js` (Supabase I/O for `knowledge_chunks` — insert, delete-by-knowledge-id, load-by-knowledge-id, and the `match_knowledge_chunks` similarity-search RPC; not yet wired into any flow, see `PROJECT_STATE.md`).
-- **services/** — domain logic, grouped by responsibility: `ai/` (embeddings — single-text `createEmbedding()` plus a batch `createEmbeddings()` helper with bounded concurrency), `analysis/` (AI summarization + normalization), `chat/` (RAG-lite Q&A over Knowledge), `content/` (YouTube metadata + transcript), `finance/` (parsing, categorization, Supabase persistence), `inbox/` (a content-type classifier, `inboxClassifier.js`/`inboxService.js`, still unwired — plus the hybrid AI router pipeline described below, wired in shadow mode only), `search/` (keyword search over Knowledge), `storage/` (Knowledge, Memory, Task persistence, plus `knowledgeChunkService.js` — chunk + embed + replace/query knowledge chunks; not yet wired into any flow), `workflows/` (the YouTube pipeline assembly).
+- **services/** — … `inbox/` (Unified Inbox observation + Universal Extractor shadow candidates + hybrid AI router; legacy `inboxClassifier.js` unused), …
 - **handlers/** — Telegram-facing routing. Currently one large message handler plus extracted route files (`financeRoute.js` for finance reads, `youtubeRoute.js` for YouTube ingestion, `voiceRoute.js` for voice transcription, `menuRoute.js` for the navigation menu — see "Navigation Menu" below) and `keyboards/mainMenu.js` (pure Telegram keyboard builders). Most domains (memory, knowledge, tasks, finance writes) are still routed inline in the main handler rather than in dedicated route files.
 
 ### Current Data Stores
 
 - **Supabase**: `finance_transactions`, `memories` (+ `match_memories` RPC for vector similarity search).
 - **JSON files** (`knowledge/youtube/*.json`): Knowledge storage — migration to Supabase is in progress (see `PROJECT_STATE.md`).
+
+### Unified Inbox + Universal Extraction (shadow observation)
+
+Target flow for all future sources:
+
+```
+Input source → Inbox item → normalization → deterministic / AI analysis
+  → universal extraction (shadow) → information-kind classification
+  → validation → existing execution ownership → domain services
+  → Inbox lifecycle update → Telegram / Web response
+```
+
+Inbox is the **canonical audit and information-structuring layer**. It records what arrived, who sent it, how it was classified/extracted, and what executed or was skipped. It never creates Finance/Tasks/Memory/Knowledge (or Ideas/Health/Projects), never deletes data, and never sends Telegram messages. Existing routers and domain services remain authoritative.
+
+**Domain Registry** (`config/domainRegistry.js`, see `docs/DOMAINS.md`) describes every ALMAS domain (`id`, flags, `futureTable`). Universal Extraction kinds, Inbox information kinds, and AI-router action-type membership are derived from it — feature modules must not hardcode parallel domain lists.
+
+**Universal Extractor** (`services/inbox/universalExtractor.js`) is **shadow-only**: it splits one message into ordered structured candidate items (finance/task/idea/health/project/…), runs **Universal Entity Extraction** (`services/entities/*`) then **Universal Relationship Extraction** (`services/relationships/*`) to attach grounded links between existing entities/items, validates and sanitizes them, and stores the result on `inbox_items.metadata.universalExtraction` / `routing_decision.universalExtraction`. It does **not** execute new domains. Domain activation comes later, one kind at a time.
+
+Pipeline: `Extraction → Entity Extraction → Relationship Extraction → Validator → Inbox`.
+
+Runtime: Inbox observation is wired through `inboxObservation.js` (received → analysis → extraction → execution chain) but defaults remain `INBOX_ENABLED=false`, `INBOX_MODE=off` (zero writes until enabled). Migration `0003` is applied. Telegram replies and Finance/Task/Memory ownership are unchanged.
 
 ### Normalized Ingestion Contract
 
@@ -60,6 +81,17 @@ A button-based main menu replaces the old plain-text "Пока я умею" fall
 - `routeText()` (`handlers/messageHandler.js`) intercepts the exact main-menu button labels (plus `/start` and `"меню"`) in a small dispatch table, checked first — before any Finance/Memory/Task/Knowledge command — but after the (untouched) AI-router shadow hook. Unrecognized input now shows the main menu ("Не понял запрос. Выбери раздел в меню 👇") instead of the old long command list, which moved verbatim into `sendHelp()` (reachable via "❓ Помощь").
 - **Stateless by design**: buttons that would otherwise need free-text input (Knowledge/Memory search, Memory recall) do not introduce session state — they reply with the existing typed command to use (e.g. "Напиши: найди `<запрос>`"), keeping the whole navigation layer additive and isolated from the AI router's execution-ownership work.
 - **`config/webapp.js`** — `ALMAS_WEB_APP_URL` (must be `https://`, else ignored). When set, "🌐 Открыть ALMAS" becomes a real `web_app` button (opens client-side, no message sent to the bot); when unset (the current, untouched `.env`), it stays a plain button whose label `routeText()` intercepts to reply "Веб-интерфейс пока не подключён."
+
+### Telegram Mini App (presentation layer)
+
+`mini-app/` is a separate Vite + React + TypeScript client (Foundation v1). It is a **presentation shell** only:
+
+- Navigates Home / Inbox / Finance / Tasks / More (+ Knowledge and placeholders).
+- Uses `window.Telegram.WebApp` when available; works in browser preview without Telegram.
+- Consumes a typed `apiClient` boundary; v1 uses `mockApi` only (no live ALMAS data, no Supabase from the client).
+- Must call a future ALMAS backend HTTPS API — **direct privileged Supabase access from the Mini App is forbidden**.
+- `initDataUnsafe` is UI personalization only; authenticated identity must be validated server-side from raw `initData`.
+- Deployment and live `ALMAS_WEB_APP_URL` wiring are **not** completed in this milestone; bot menu behavior is unchanged until a real HTTPS URL is set.
 
 Before routing, a voice transcript must survive:
 

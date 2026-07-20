@@ -40,6 +40,31 @@ Known limitation: **Tasks currently live in this table**, filtered via `metadata
 
 Purpose: vector similarity search over `memories.embedding`. Called with `query_embedding`, `match_threshold`, `match_count`.
 
+### `inbox_items` (migration applied)
+
+Purpose: Unified Inbox audit / structuring layer for every inbound message, independent of domain tables (Finance/Memory/Tasks/Knowledge). Does not execute business actions.
+
+Defined in `supabase/migrations/0003_create_inbox_items.sql` — **applied**.
+
+| Field | Notes |
+|---|---|
+| id | uuid PK |
+| request_key | unique idempotency key (Telegram `message_id` primary via `buildRequestKey`) |
+| source_type | `telegram_text` \| `telegram_voice` \| `youtube` \| `pdf` \| `image` \| `website` \| `note` \| `automation` \| `unknown` |
+| actor_key | stable identity, e.g. `telegram:<telegram_user_id>` — never username |
+| telegram_user_id | Telegram user id (bigint); chat_id is context only |
+| chat_id / username / first_name / last_name | context / display metadata |
+| original_text / normalized_text | preserved separately |
+| language | e.g. `ru`, `unknown` |
+| information_kinds | jsonb array of kind labels (`finance`, `task`, `idea`, …) |
+| routing_decision / execution_summary | sanitized jsonb audit snapshots; may include `universalExtraction` (shadow candidate items) |
+| status | lifecycle: `received` → `analyzed` / `executed` / `partially_executed` / `clarification_required` / `failed` / `skipped` / … |
+| error_code | stable code when failed |
+| metadata | sanitized jsonb — includes `universalExtraction` when shadow extractor ran |
+| created_at / updated_at | timestamps (`updated_at` via trigger) |
+
+**Universal extraction** (shadow): candidate items `{ index, kind, content, confidence, entities, relationships, temporal, requiresClarification, clarificationReason }` are stored only in jsonb (`metadata` / `routing_decision`). `entities` holds domain fields plus universal named-entity bags; `relationships` holds `{ type, sourceKind, targetKind, confidence, metadata }` links that only connect entities/items already present (never invented). No schema change; no Idea/Health/Project domain tables.
+
 ### `knowledge`
 
 Purpose: structured knowledge extracted from any content source (currently YouTube only).

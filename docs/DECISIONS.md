@@ -157,3 +157,49 @@ Execution ownership: каждое сообщение выполняется ро
 Статус
 
 ПРИНЯТО
+
+---
+
+## D-013
+
+Unified Inbox — канонический слой аудита и структурирования для всех будущих источников ввода (Telegram text/voice, YouTube, PDF, image, website, notes, automation).
+
+Inbox отвечает на вопросы: что пришло, кто отправил, откуда, как нормализовано, как классифицировано, какие действия предложены/выполнены/пропущены, нужна ли clarification, был ли сбой.
+
+Inbox отделён от доменного хранения (Finance/Memory/Tasks/Knowledge) и **никогда не исполняет** бизнес-действия: не пишет в Finance/Memory/Tasks/Knowledge, не удаляет данные, не шлёт Telegram. Shadow observation / Universal Extraction могут вызывать AI только для аудита, когда Inbox включён.
+
+Почему выключен по умолчанию: defaults `INBOX_ENABLED=false`, `INBOX_MODE=off`. Миграция `0003` применена; shadow observation + Universal Extraction подключены в код, но не активны без env.
+
+Идемпотентность: уникальный `request_key` (Telegram `message_id` через `buildRequestKey`). Идентичность актора: `actor_key = telegram:<telegram_user_id>`; username — только display metadata; `chat_id` — контекст, не identity. Household/family aggregation — явно будущая работа.
+
+Статус
+
+ПРИНЯТО
+
+---
+
+## D-014
+
+Universal Information Extraction — shadow-only слой, который из одного сообщения выделяет несколько независимых структурированных candidate items (finance / task / idea / health / project / …).
+
+Extractor производит кандидатов (entities, confidence, clarification flags), валидирует и санитизирует их, и записывает результат в Inbox (`metadata.universalExtraction` / `routing_decision.universalExtraction`). Он **не исполняет** Idea/Health/Project/News/Investment/Contact и не меняет ownership Finance/Task/Memory.
+
+Inbox остаётся audit-слоем. Активация доменов — отдельно, по одному kind за раз. Provider failure не влияет на routing / Telegram replies.
+
+Статус
+
+ПРИНЯТО
+
+---
+
+## D-015
+
+Telegram Mini App (`mini-app/`) — слой представления. ALMAS Core (бот / сервисы) остаётся источником бизнес-логики.
+
+Mini App обращается только к будущему HTTPS API бэкенда ALMAS. Прямой привилегированный доступ к Supabase из клиента запрещён. Foundation v1 использует mock-данные через `apiClient` / `mockApi`.
+
+`initDataUnsafe` — только для UI (приветствие/тема). Аутентификация на бэкенде — по сырому подписанному `initData` с проверкой подписи Telegram. Деплой и `ALMAS_WEB_APP_URL` в этом этапе не выполняются; живое меню бота не меняется, пока URL не задан.
+
+Статус
+
+ПРИНЯТО

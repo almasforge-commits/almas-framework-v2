@@ -15,6 +15,10 @@ import { validateRoutingContract } from "./actionValidator.js";
 import { normalizeRoutingContract } from "./contracts.js";
 import { createOpenAiPlannerProvider } from "../../providers/ai/openaiPlannerProvider.js";
 import { executeActions } from "./actionExecutor.js";
+import {
+  queueInboxDecisionObservation,
+  queueInboxFailure,
+} from "./inboxObservation.js";
 
 // Top-level orchestrator for the hybrid AI router. This is the ONLY
 // module handlers/messageHandler.js talks to. It ties together:
@@ -100,10 +104,14 @@ function logDecision(decision) {
  * @param {number|string} [context.chatId] - forwarded to the executor for Memory/Task metadata only.
  * @param {{ id?, username?, first_name? }} [context.from] - Telegram msg.from, forwarded the same way.
  * @param {string|null} [context.requestKey] - forwarded to the executor for cross-call idempotency (see core/utils/buildRequestKey.js / actionExecutor.js).
+ * @param {string|null} [context.sourceType] - Inbox source type (telegram_text|telegram_voice); audit only.
+ * @param {string|null} [context.normalizedText] - Inbox normalized text; audit only.
+ * @param {object|null} [context.actor] - Inbox actor; audit only, unused by routing.
  * @param {import("../../providers/ai/plannerProvider.js").PlannerProvider} [context.provider] - injected for tests; defaults to the real OpenAI-backed provider.
  * @param {object} [context.configOverrides] - injected for tests only.
  * @param {Function} [context.executeActionsFn] - injected for tests; defaults to the real executeActions.
  * @param {object} [context.executorDeps] - injected for tests; forwarded to executeActionsFn's deps param.
+ * @param {object} [context.inboxDeps] - injected for tests; forwarded to Inbox observation helpers.
  * @returns {Promise<object|{ skipped: true, reason: string }>}
  */
 export async function decideRouting(rawText, context = {}) {
@@ -114,145 +122,166 @@ export async function decideRouting(rawText, context = {}) {
     chatId = null,
     from = null,
     requestKey = null,
+    sourceType = null,
+    normalizedText = null,
+    originalText = null,
     provider,
     configOverrides = {},
     executeActionsFn = executeActions,
     executorDeps = {},
+    inboxDeps = {},
   } = context;
 
-  const enabled = configOverrides.enabled ?? AI_ROUTER_ENABLED;
-  const mode = configOverrides.mode ?? AI_ROUTER_MODE;
-
-  if (!enabled || mode === "off") {
-    return { skipped: true, reason: "disabled", mode };
-  }
-
-  const maxInputChars = configOverrides.maxInputChars ?? AI_ROUTER_MAX_INPUT_CHARS;
-  const maxActions = configOverrides.maxActions ?? AI_ROUTER_MAX_ACTIONS;
-  const cheapModel = configOverrides.cheapModel ?? AI_ROUTER_CHEAP_MODEL;
-  const mediumModel = configOverrides.mediumModel ?? AI_ROUTER_MEDIUM_MODEL;
-  const confidenceThreshold =
-    configOverrides.cheapConfidenceThreshold ?? AI_ROUTER_CHEAP_CONFIDENCE_THRESHOLD;
-
-  const normalized = normalizeForRouting(rawText, { maxChars: maxInputChars, inputSource });
-
-  let tier = "deterministic";
-  let usage = null;
-  let escalated = false;
-  let rawContract = detectDeterministicIntent(normalized.normalized);
-
-  if (!rawContract) {
-    const activeProvider = provider || getDefaultProvider();
-
-    const cheapResult = await analyzeIntent(normalized, {
-      provider: activeProvider,
-      model: cheapModel,
-      maxActions,
-    });
-
-    tier = "cheap";
-    usage = cheapResult.usage;
-
-    if (!cheapResult.ok) {
-      // "Provider failure -> deterministic fallback, no crash": we do
-      // not guess: no safe action, ask for clarification, log why.
-      rawContract = {
-        language: "unknown",
-        actions: [],
-        needsClarification: true,
-        clarificationQuestion: null,
-        shouldEscalate: false,
-        reasonCode: `tier1_failed:${cheapResult.reason || "unknown"}`,
-      };
-      tier = "fallback";
-    } else {
-      // Canonicalize aliases (title/text → content) before the escalation
-      // check so a complete task that used payload.title is not treated
-      // as "missing content" and needlessly sent to the medium model.
-      const normalizedCheap = {
-        ...cheapResult,
-        contract: normalizeRoutingContract(cheapResult.contract),
-      };
-      rawContract = normalizedCheap.contract;
-
-      if (shouldEscalateToMediumTier(normalizedCheap, normalized, { confidenceThreshold })) {
-        escalated = true;
-
-        const mediumResult = await planWithMediumTier(normalized, {
-          provider: activeProvider,
-          cheapContract: normalizedCheap.contract,
-          model: mediumModel,
-          maxActions,
-        });
-
-        if (mediumResult.ok) {
-          tier = "medium";
-          usage = mediumResult.usage;
-          rawContract = normalizeRoutingContract(mediumResult.contract);
-        } else {
-          // Medium tier failed — keep the cheap tier's result rather
-          // than escalating further or crashing. Tier 3 does not exist
-          // in this milestone.
-          rawContract = {
-            ...normalizedCheap.contract,
-            reasonCode: `tier2_failed:${mediumResult.reason || "unknown"}`,
-          };
-        }
-      }
-    }
-  } else {
-    rawContract = normalizeRoutingContract(rawContract);
-  }
-
-  const validated = validateRoutingContract(rawContract, {
+  const inboxContext = {
+    sourceType,
+    normalizedText: normalizedText ?? "",
+    originalText: originalText ?? rawText ?? "",
     inputSource,
-    maxActions,
-    confidenceThreshold,
-  });
-
-  const execution = await executeActionsFn(
-    validated.actions,
-    {
-      mode,
-      chatId,
-      userId: from?.id ?? null,
-      username: from?.username ?? null,
-      firstName: from?.first_name ?? null,
-      requestKey,
-    },
-    executorDeps
-  );
-
-  const skippedReasons = summarizeSkippedReasons(execution.results);
-
-  const decision = {
-    mode,
-    tier,
-    escalated,
-    inputSource,
-    language: validated.language,
-    actions: validated.actions,
-    rejectedActions: validated.rejectedActions,
-    needsClarification: validated.needsClarification,
-    clarificationQuestion: validated.clarificationQuestion,
-    shouldEscalate: validated.shouldEscalate,
-    reasonCode: validated.reasonCode,
-    // Informational only — reflects whether the validator considers the
-    // plan clean/actionable, independent of whether it was actually run.
-    wouldExecute: validated.wouldExecute,
-    execution: execution.results,
-    executedCount: execution.executedCount,
-    skippedCount: execution.skippedCount,
-    skippedReasons,
-    executed: execution.executedCount > 0,
-    usage,
-    inputPreview: sanitizedPreview(normalized.normalized),
-    timings: { totalMs: Date.now() - startedAt },
   };
 
-  logDecision(decision);
+  try {
+    const enabled = configOverrides.enabled ?? AI_ROUTER_ENABLED;
+    const mode = configOverrides.mode ?? AI_ROUTER_MODE;
 
-  return decision;
+    if (!enabled || mode === "off") {
+      const skipped = { skipped: true, reason: "disabled", mode };
+      queueInboxDecisionObservation(requestKey, skipped, inboxContext, inboxDeps);
+      return skipped;
+    }
+
+    const maxInputChars = configOverrides.maxInputChars ?? AI_ROUTER_MAX_INPUT_CHARS;
+    const maxActions = configOverrides.maxActions ?? AI_ROUTER_MAX_ACTIONS;
+    const cheapModel = configOverrides.cheapModel ?? AI_ROUTER_CHEAP_MODEL;
+    const mediumModel = configOverrides.mediumModel ?? AI_ROUTER_MEDIUM_MODEL;
+    const confidenceThreshold =
+      configOverrides.cheapConfidenceThreshold ?? AI_ROUTER_CHEAP_CONFIDENCE_THRESHOLD;
+
+    const normalized = normalizeForRouting(rawText, { maxChars: maxInputChars, inputSource });
+
+    let tier = "deterministic";
+    let usage = null;
+    let escalated = false;
+    let rawContract = detectDeterministicIntent(normalized.normalized);
+
+    if (!rawContract) {
+      const activeProvider = provider || getDefaultProvider();
+
+      const cheapResult = await analyzeIntent(normalized, {
+        provider: activeProvider,
+        model: cheapModel,
+        maxActions,
+      });
+
+      tier = "cheap";
+      usage = cheapResult.usage;
+
+      if (!cheapResult.ok) {
+        // "Provider failure -> deterministic fallback, no crash": we do
+        // not guess: no safe action, ask for clarification, log why.
+        rawContract = {
+          language: "unknown",
+          actions: [],
+          needsClarification: true,
+          clarificationQuestion: null,
+          shouldEscalate: false,
+          reasonCode: `tier1_failed:${cheapResult.reason || "unknown"}`,
+        };
+        tier = "fallback";
+      } else {
+        // Canonicalize aliases (title/text → content) before the escalation
+        // check so a complete task that used payload.title is not treated
+        // as "missing content" and needlessly sent to the medium model.
+        const normalizedCheap = {
+          ...cheapResult,
+          contract: normalizeRoutingContract(cheapResult.contract),
+        };
+        rawContract = normalizedCheap.contract;
+
+        if (shouldEscalateToMediumTier(normalizedCheap, normalized, { confidenceThreshold })) {
+          escalated = true;
+
+          const mediumResult = await planWithMediumTier(normalized, {
+            provider: activeProvider,
+            cheapContract: normalizedCheap.contract,
+            model: mediumModel,
+            maxActions,
+          });
+
+          if (mediumResult.ok) {
+            tier = "medium";
+            usage = mediumResult.usage;
+            rawContract = normalizeRoutingContract(mediumResult.contract);
+          } else {
+            // Medium tier failed — keep the cheap tier's result rather
+            // than escalating further or crashing. Tier 3 does not exist
+            // in this milestone.
+            rawContract = {
+              ...normalizedCheap.contract,
+              reasonCode: `tier2_failed:${mediumResult.reason || "unknown"}`,
+            };
+          }
+        }
+      }
+    } else {
+      rawContract = normalizeRoutingContract(rawContract);
+    }
+
+    const validated = validateRoutingContract(rawContract, {
+      inputSource,
+      maxActions,
+      confidenceThreshold,
+    });
+
+    const execution = await executeActionsFn(
+      validated.actions,
+      {
+        mode,
+        chatId,
+        userId: from?.id ?? null,
+        username: from?.username ?? null,
+        firstName: from?.first_name ?? null,
+        requestKey,
+      },
+      executorDeps
+    );
+
+    const skippedReasons = summarizeSkippedReasons(execution.results);
+
+    const decision = {
+      mode,
+      tier,
+      escalated,
+      inputSource,
+      language: validated.language,
+      actions: validated.actions,
+      rejectedActions: validated.rejectedActions,
+      needsClarification: validated.needsClarification,
+      clarificationQuestion: validated.clarificationQuestion,
+      shouldEscalate: validated.shouldEscalate,
+      reasonCode: validated.reasonCode,
+      // Informational only — reflects whether the validator considers the
+      // plan clean/actionable, independent of whether it was actually run.
+      wouldExecute: validated.wouldExecute,
+      execution: execution.results,
+      executedCount: execution.executedCount,
+      skippedCount: execution.skippedCount,
+      skippedReasons,
+      executed: execution.executedCount > 0,
+      usage,
+      inputPreview: sanitizedPreview(normalized.normalized),
+      timings: { totalMs: Date.now() - startedAt },
+    };
+
+    logDecision(decision);
+
+    // Inbox audit only — never mutates decision / never awaited here.
+    queueInboxDecisionObservation(requestKey, decision, inboxContext, inboxDeps);
+
+    return decision;
+  } catch (error) {
+    queueInboxFailure(requestKey, "routing_failed", inboxDeps);
+    throw error;
+  }
 }
 
 // The only two action types the AI router is ever allowed to own/execute

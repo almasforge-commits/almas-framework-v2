@@ -35,6 +35,21 @@
   - Covered by `scripts/test-ai-router-contracts.js`, `scripts/test-ai-router-config.js`, `scripts/test-planner-provider.js`, `scripts/test-input-normalizer.js`, `scripts/test-deterministic-intent-detector.js`, `scripts/test-ai-intent-analyzer.js`, `scripts/test-action-planner-tiers.js`, `scripts/test-action-validator.js`, `scripts/test-action-executor.js`, `scripts/test-routing-decision-service.js` (incl. ownership/confirmation/idempotency scenarios), `scripts/test-ai-execution-route.js`, `scripts/test-build-request-key.js`, `scripts/test-strip-trailing-action-clause.js`, `scripts/test-finance-description-cleanup.js`, plus extended `scripts/test-message-router-extraction.js`
   - `AI_ROUTER_MODE` remains `shadow` in `.env` — active ownership/confirmations are implemented and tested but not enabled live
 
+- **Domain Registry (`config/domainRegistry.js`)**
+  - Single source of truth for domain ids, flags (`extractable` / `executable` / search / timeline / AI), icons, and `futureTable`
+  - Wired into Universal Extraction kinds, Inbox `INFORMATION_KINDS`, and AI-router `ACTION_TYPES` membership via `contracts.js` / `actionValidator.js`
+  - Documented in `docs/DOMAINS.md`; covered by `scripts/test-domain-registry.js`
+  - No Telegram, DB, execution, or `.env` behavior changes
+
+- **Unified Inbox foundation + shadow observation wiring (disabled by default)**
+  - Contracts / sanitizer / classifier / config / driver / service as before; migration `0003` **applied**
+  - Runtime wrapper `services/inbox/inboxObservation.js`: per-`requestKey` ordered chain `received → analysis → universalExtraction → execution` (detached from Telegram reply timing)
+  - **Universal Extractor** + **Entity Extraction** + **Relationship Extraction** (`services/entities/*`, `services/relationships/*`): shadow-only multi-item candidates with grounded entities and relationships; persists sanitized jsonb on Inbox; does **not** execute Idea/Health/Project/News/Investment
+  - Pipeline: Extraction → Entity Extraction → Relationship Extraction → Validator → Inbox
+  - Wired: `routeText` / `decideRouting` observation chain unchanged for Telegram replies; `voiceRoute.js` untouched
+  - Defaults remain `INBOX_ENABLED=false` / `INBOX_MODE=off`; `.env` not modified
+  - Covered by prior Inbox tests plus `scripts/test-inbox-observation.js`, `scripts/test-universal-extraction.js`, `scripts/test-entity-extraction.js`, `scripts/test-relationship-extraction.js`
+
 - **Navigation menu (button-based main menu)**
   - Persistent `ReplyKeyboardMarkup` main menu (📚 Знания / 💡 Идеи / 📋 Задачи / 🚀 Проекты / 💰 Финансы / 🧠 Память / 🌐 Открыть ALMAS / ❓ Помощь) shown on `/start`, `"меню"`, and pressing "🏠 Главная"; also shown as the new fallback ("Не понял запрос. Выбери раздел в меню 👇") instead of the old long command-list text (which moved, byte-for-byte, into `sendHelp()`, reachable via "❓ Помощь")
   - `handlers/keyboards/mainMenu.js` (pure keyboard builders), `handlers/routes/menuRoute.js` (one `send*()` per section, reusing existing unmodified read functions only), `handlers/callbackHandler.js` (`registerCallbackHandler()`, wired in `index.js` next to `registerMessageHandler()`), `config/webapp.js` (`ALMAS_WEB_APP_URL`, unset by default, `.env` untouched)
@@ -43,7 +58,15 @@
   - Ideas and Projects are clean placeholders only ("раздел готовится")
   - Menu dispatch remains a separate exact-match block from AI ownership; AI confirmations never replace menu button handling
   - Covered by `scripts/test-main-menu-keyboards.js`, `scripts/test-menu-route.js`, `scripts/test-callback-handler.js`, plus extended `scripts/test-message-router-extraction.js`
-  - Known limitation: "🌐 Открыть ALMAS" always shows "Веб-интерфейс пока не подключён." until `ALMAS_WEB_APP_URL` is set to a real `https://` URL (no web app exists yet)
+  - Known limitation: "🌐 Открыть ALMAS" always shows "Веб-интерфейс пока не подключён." until `ALMAS_WEB_APP_URL` is set to a real `https://` URL
+
+- **Telegram Mini App Foundation v1 (`mini-app/`)**
+  - Separate Vite + React + TypeScript + Tailwind client; mock dashboard / Inbox / Finance / Tasks / Knowledge / More placeholders
+  - Telegram WebApp bridge (`ready` / `expand` / theme / display user); browser preview without Telegram
+  - Typed `apiClient` + `mockApi` boundary only — no live API, no Supabase credentials in the client
+  - Presentation layer only; ALMAS Core remains business-logic source of truth
+  - Not deployed; `ALMAS_WEB_APP_URL` / BotFather / `.env` / live menu button not connected yet
+  - See `mini-app/README.md`
 
 ## In Progress
 
@@ -62,15 +85,20 @@
 
 ## Next
 
+- Mini App: HTTPS backend API for dashboard/Inbox/Finance/Tasks/Knowledge + server-side Telegram `initData` validation; then deploy static Mini App and set `ALMAS_WEB_APP_URL`
 - Inspect/apply RLS + apply the Knowledge migration (`0001`) to Supabase
 - Implement additional source-specific loaders (PDF, Website, Voice, Notes, Instagram transcripts) that populate the same `context.metadata.source` contract and reuse the shared `buildKnowledge` → `saveKnowledge` → chunk/embed pipeline
 - Unified RAG across Knowledge + Memory (replacing the two separate search systems)
 - Dedicated `tasks` table (replacing the Memory-table workaround)
-- Wire up the existing but unused Inbox content-type classifier (`services/inbox/inboxClassifier.js`)
+- Enable Inbox shadow in `.env` (`INBOX_ENABLED=true`, `INBOX_MODE=shadow`) after manual verification against Supabase
+- Optional: richer legacy-domain execution summaries on Inbox beyond AI-router `execution[]`
 - Extend AI-router active execution beyond `task_create`/`memory_save` to Finance (with explicit duplicate-prevention against the deterministic Finance parser) and, eventually, confirmed destructive/system commands — currently only `task_create`/`memory_save` are whitelisted in `services/inbox/actionExecutor.js`, and `AI_ROUTER_MODE` stays `shadow` in `.env` (see `ARCHITECTURE.md`)
 
 ## Future
 
+- Live Mini App surfaces bound to real Inbox / domain reads (after API)
+- Household / membership model (wife and family aggregation)
+- Domain tables for Ideas, Health, Projects, News, Investments
 - Health tracking
 - Research agent
 - Automation engine

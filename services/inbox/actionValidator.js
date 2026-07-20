@@ -1,9 +1,10 @@
 import {
-  ACTION_TYPES,
   LANGUAGES,
   PAYLOAD_FIELDS,
   isDestructiveAction,
   canonicalizeActionPayload,
+  isValidActionType,
+  getDomainIdForActionType,
 } from "./contracts.js";
 import { AI_ROUTER_MAX_ACTIONS, AI_ROUTER_CHEAP_CONFIDENCE_THRESHOLD } from "../../config/aiRouter.js";
 
@@ -13,6 +14,9 @@ import { AI_ROUTER_MAX_ACTIONS, AI_ROUTER_CHEAP_CONFIDENCE_THRESHOLD } from "../
 // re-checked; nothing here trusts the AI's own confidence/flags at face
 // value. This module makes decisions only; it never calls a domain
 // service and never executes anything.
+//
+// Known action types / domain membership come from config/domainRegistry.js
+// via contracts.js — do not hardcode parallel domain lists here.
 
 const FALLBACK_CLARIFICATION_QUESTION =
   "Не удалось точно понять запрос. Уточните, пожалуйста, что нужно сделать?";
@@ -86,7 +90,7 @@ export function validateRoutingContract(rawContract, context = {}) {
 
     const type = rawAction?.type;
 
-    if (!ACTION_TYPES.includes(type)) {
+    if (!isValidActionType(type) || !getDomainIdForActionType(type)) {
       rejectedActions.push({ action: rawAction, reason: "unknown_action_type" });
       return;
     }

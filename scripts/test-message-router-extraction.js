@@ -307,10 +307,35 @@ function run() {
       routeTextBody,
       /const requestKey = buildRequestKey\(\{ chatId, messageId, text \}\);/
     );
+    assert.match(routeTextBody, /const routingContext = \{/);
+    assert.match(routeTextBody, /requestKey,/);
+    assert.match(routeTextBody, /sourceType,/);
+    assert.match(routeTextBody, /normalizedText: inboxNormalizedText,/);
+    assert.match(routeTextBody, /originalText: text,/);
+  });
+
+  test("routeText starts Inbox received observation after menu/meaningless and before AI routing; never awaits it", () => {
     assert.match(
-      routeTextBody,
-      /const routingContext = \{ inputSource, chatId, from, requestKey \};/
+      source,
+      /import \{\s*mapInputSourceToInboxSourceType,\s*startInboxReceivedObservation,\s*\} from "\.\.\/services\/inbox\/inboxObservation\.js";/
     );
+    assert.match(routeTextBody, /startInboxReceivedObservation\(\{/);
+    assert.match(routeTextBody, /mapInputSourceToInboxSourceType\(inputSource\)/);
+
+    const menuIndex = routeTextBody.indexOf("const menuHandler = {");
+    const meaninglessIndex = routeTextBody.indexOf("if (isMeaninglessShortInput(text))");
+    const inboxIndex = routeTextBody.indexOf("startInboxReceivedObservation({");
+    const aiActiveIndex = routeTextBody.indexOf("if (isAiRouterExecutionActive()) {");
+    const observeIndex = routeTextBody.indexOf("observeMessage(text, routingContext)");
+
+    assert.ok(menuIndex !== -1 && meaninglessIndex !== -1 && inboxIndex !== -1);
+    assert.ok(menuIndex < inboxIndex, "menu must run before Inbox");
+    assert.ok(meaninglessIndex < inboxIndex, "meaningless input must run before Inbox");
+    assert.ok(inboxIndex < aiActiveIndex, "Inbox received must start before AI active branch");
+    assert.ok(inboxIndex < observeIndex, "Inbox received must start before shadow observeMessage");
+
+    const inboxCall = routeTextBody.slice(inboxIndex, inboxIndex + 400);
+    assert.doesNotMatch(inboxCall, /await\s+startInboxReceivedObservation/);
   });
 
   test("active mode (isAiRouterExecutionActive()) AWAITS decideRouting() before any legacy side effect; shadow/off keeps the original fire-and-forget observeMessage() call", () => {

@@ -8,6 +8,8 @@ It is not a Telegram bot. Telegram is the first interface, not the product.
 
 ## Mission
 
+ALMAS turns information chaos into structured personal data, knowledge, and useful actions.
+
 Help the user think better, decide faster, and spend less time on repetitive work by turning everything important in their life into structured, retrievable knowledge.
 
 ## Core Principle
