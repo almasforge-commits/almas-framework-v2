@@ -1,6 +1,12 @@
+import { normalizeCommandText } from "../../core/utils/normalizeUserText.js";
+
 export function parseFinanceQuery(text = "") {
 
-    const q = text.toLowerCase().trim();
+    // Normalized (trimmed, whitespace-collapsed, trailing-punctuation
+    // stripped, lowercased) so voice transcripts like "Удали последнюю
+    // операцию." or "удали   последнюю   операцию!" still match the
+    // exact phrases below, not just perfectly clean typed text.
+    const q = normalizeCommandText(text);
   
     if (
       q === "аналитика" ||

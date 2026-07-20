@@ -1,10 +1,22 @@
 import OpenAI from "openai";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 const DEFAULT_MODEL = process.env.OPENAI_MODEL ?? "gpt-5-mini";
+
+// Lazily constructed (same pattern as embeddingService.js /
+// transcriptionService.js): constructing the OpenAI SDK client throws
+// immediately if OPENAI_API_KEY is missing, so importing this module
+// must never do that at load time — only askAI() actually calling out
+// needs a real client.
+let client = null;
+
+function getClient() {
+  if (!client) {
+    client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return client;
+}
 
 export async function askAI(
   systemPrompt,
@@ -50,7 +62,7 @@ export async function askAI(
 
     }
 
-    const response = await client.responses.create(request);
+    const response = await getClient().responses.create(request);
 
     if (!response?.output_text) {
       return null;

@@ -104,6 +104,50 @@ async function run() {
     assert.equal(receivedModel, "gpt-4o-mini-transcribe");
   });
 
+  await test("transcribeAudio requests Russian ('ru') by default", async () => {
+    let receivedLanguage = null;
+
+    await transcribeAudio("/tmp/fake.ogg", {
+      createTranscriptionFn: async (params) => {
+        receivedLanguage = params.language;
+        return { text: "ok" };
+      },
+      createReadStreamFn: fakeReadStream,
+    });
+
+    assert.equal(receivedLanguage, "ru");
+  });
+
+  await test("transcribeAudio uses the provided language option instead of the default", async () => {
+    let receivedLanguage = null;
+
+    await transcribeAudio("/tmp/fake.ogg", {
+      language: "en",
+      createTranscriptionFn: async (params) => {
+        receivedLanguage = params.language;
+        return { text: "ok" };
+      },
+      createReadStreamFn: fakeReadStream,
+    });
+
+    assert.equal(receivedLanguage, "en");
+  });
+
+  await test("transcribeAudio omits the language param when explicitly passed as an empty string", async () => {
+    let params = null;
+
+    await transcribeAudio("/tmp/fake.ogg", {
+      language: "",
+      createTranscriptionFn: async (p) => {
+        params = p;
+        return { text: "ok" };
+      },
+      createReadStreamFn: fakeReadStream,
+    });
+
+    assert.equal(Object.prototype.hasOwnProperty.call(params, "language"), false);
+  });
+
   await test("transcribeAudio passes filePath through createReadStreamFn", async () => {
     let receivedPath = null;
 

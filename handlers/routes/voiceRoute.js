@@ -4,6 +4,8 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 import { transcribeAudio } from "../../services/ai/transcriptionService.js";
+import { isPlausibleRussianTranscript } from "../../core/utils/validateVoiceTranscript.js";
+import { normalizeUserText } from "../../core/utils/normalizeUserText.js";
 
 export const MAX_VOICE_DURATION_SECONDS = 120;
 export const MAX_VOICE_FILE_SIZE_BYTES = 15 * 1024 * 1024;
@@ -12,6 +14,7 @@ const DURATION_ERROR = "❌ Голосовое сообщение слишком
 const SIZE_ERROR = "❌ Голосовое сообщение слишком большое (максимум 15 МБ).";
 const DOWNLOAD_ERROR = "❌ Не удалось загрузить голосовое сообщение. Попробуйте позже.";
 const TRANSCRIBE_ERROR = "❌ Не удалось распознать речь. Попробуйте ещё раз или отправьте текст.";
+const LOW_CONFIDENCE_ERROR = "❌ Не удалось уверенно распознать речь. Попробуйте сказать ещё раз.";
 
 // Importing config/bot.js constructs a real, polling TelegramBot as a
 // module-level side effect. Deferring the import until a real (non-test)
@@ -63,6 +66,7 @@ export async function handleVoiceMessage(chatId, voice, options = {}) {
     sendMessageFn = async (id, text) => (await getBot()).sendMessage(id, text),
     tmpDir = os.tmpdir(),
     randomIdFn = () => crypto.randomUUID(),
+    isPlausibleTranscriptFn = isPlausibleRussianTranscript,
   } = options;
 
   if (!voice || !voice.file_id) {
@@ -129,9 +133,20 @@ export async function handleVoiceMessage(chatId, voice, options = {}) {
       return null;
     }
 
-    await sendMessageFn(chatId, `🎙 Распознано:\n\n${text}`);
+    // Light normalization only (collapse whitespace/repeated
+    // punctuation) — case and (non-repeated) punctuation are preserved
+    // since routeText()'s own normalization (for command matching) and
+    // finance/knowledge parsing need the original content.
+    const normalizedTranscript = normalizeUserText(text);
 
-    return text;
+    if (!normalizedTranscript || !isPlausibleTranscriptFn(normalizedTranscript)) {
+      await sendMessageFn(chatId, LOW_CONFIDENCE_ERROR);
+      return null;
+    }
+
+    await sendMessageFn(chatId, `🎙 Распознано:\n\n${normalizedTranscript}`);
+
+    return normalizedTranscript;
 
   } finally {
 

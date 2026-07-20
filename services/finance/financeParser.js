@@ -1,4 +1,6 @@
 import { detectCategory } from "./categorizer.js";
+import { convertSpokenNumbersToDigits } from "./russianNumberParser.js";
+import { stripTrailingActionClause } from "../../core/utils/stripTrailingActionClause.js";
 const EXPENSE_WORDS = [
     "расход",
     "расходы",
@@ -110,7 +112,15 @@ const EXPENSE_WORDS = [
     if (!text) return null;
   
     const original = text.trim();
-    const lower = original.toLowerCase();
+
+    // Convert any spoken Russian number-word phrase (e.g. "сорок тысяч")
+    // into digits ("40000") before anything else, so both trigger-word
+    // detection and the existing digit-based amount regex below can find
+    // it exactly as if it had been typed as a digit. Text that already
+    // uses digits (e.g. "расход 40000 кофе") passes through unchanged —
+    // see russianNumberParser.js for the no-op guarantee.
+    const convertedOriginal = convertSpokenNumbersToDigits(original);
+    const lower = convertedOriginal.toLowerCase();
   
     let type = null;
   
@@ -155,7 +165,7 @@ const EXPENSE_WORDS = [
       amountMatch[2]
     );
   
-    let description = original;
+    let description = convertedOriginal;
   
     [...EXPENSE_WORDS, ...INCOME_WORDS].forEach(word => {
       description = description.replace(
@@ -176,6 +186,12 @@ const EXPENSE_WORDS = [
   .replace(/[-–—:,.]/g, "")
   .replace(/\s+/g, " ")
   .trim();
+
+  // Mixed message safety (see ownership milestone, D-011): a trailing "и
+  // <task clause>" (e.g. "кофе и завтра купить батарейки") belongs to a
+  // separate action the AI router owns, not to this Finance description.
+  description = stripTrailingActionClause(description);
+
   console.log("DESCRIPTION:", description);
   if (!description) {
     description = "";
@@ -188,6 +204,31 @@ const EXPENSE_WORDS = [
     };
   }
   
+  /**
+   * Pure classifier, reusing the same word lists parseFinanceMessage()
+   * already reads from. Does not change parseFinanceMessage()'s own
+   * logic/behavior — additive only. Used by the message router to detect
+   * "this looks like a finance attempt" so it can avoid silently saving
+   * unparseable finance-like text as a Memory note — e.g. an amount
+   * phrase parseFinanceMessage() still can't make sense of even after
+   * russianNumberParser.js's spoken-number conversion (see
+   * parseFinanceMessage() above; spelled-out amounts like "сорок тысяч"
+   * ARE supported there).
+   */
+  export function looksLikeFinanceAttempt(text = "") {
+
+    if (!text) return false;
+
+    const lower = text.trim().toLowerCase();
+
+    return (
+      EXPENSE_WORDS.some(v => lower.startsWith(v)) ||
+      INCOME_WORDS.some(v => lower.startsWith(v)) ||
+      INCOME_KEYWORDS.some(v => lower.startsWith(v))
+    );
+
+  }
+
   function parseAmount(number, suffix = "") {
   
     let value = parseFloat(

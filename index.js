@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { supabase } from './providers/storage/supabase.js';
 import { registerMessageHandler } from './handlers/messageHandler.js';
+import { registerCallbackHandler } from './handlers/callbackHandler.js';
 
 const { error } = await supabase.from('memories').select('id').limit(1);
 
@@ -11,6 +12,7 @@ if (error) {
 }
 
 registerMessageHandler();
+registerCallbackHandler();
 
 console.log('🤖 ALMAS Framework Bot запущен...');
 import path from "path";

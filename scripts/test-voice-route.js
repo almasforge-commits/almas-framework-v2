@@ -10,6 +10,20 @@ import {
 // writeFileFn/unlinkFn/transcribeFn/sendMessageFn in these tests — no real
 // Telegram API call, no real OpenAI call, and no real filesystem I/O ever
 // happens here.
+//
+// Router integration note: handleVoiceMessage() itself does NOT call
+// routeText() — that wiring (and the voice destructive-command safety
+// guard) lives in handlers/messageHandler.js's bot.on("message", ...)
+// listener and inside routeText() itself, per the approved plan. This file
+// tests handleVoiceMessage()'s side of that contract: it must return the
+// recognized text on success (so the listener can pass it to routeText())
+// and null on any rejection/failure (so the listener stops without
+// routing). The listener-side wiring and the destructive-command guard are
+// covered by scripts/test-message-router-extraction.js, via source-level
+// regression checks — messageHandler.js cannot be safely imported/executed
+// in isolated tests (it constructs a real polling bot and real Supabase
+// clients at import time, and the bot import is intentionally not made
+// lazy in this task).
 
 function test(name, fn) {
   return (async () => {
@@ -205,6 +219,44 @@ async function run() {
     assert.match(deps.sendMessageFn.calls[0][1], /распознать/);
   });
 
+  await test("rejects a garbage/wrong-script transcript, sends low-confidence message, never sends the recognized text (reported bug)", async () => {
+    const deps = baseDeps();
+    deps.transcribeFn.impl = async () => "შიჵმხტი მუემიში";
+
+    const result = await handleVoiceMessage(1, { file_id: "f1", duration: 10 }, deps);
+
+    assert.equal(result, null);
+    assert.equal(deps.sendMessageFn.calls.length, 1);
+    assert.equal(
+      deps.sendMessageFn.calls[0][1],
+      "❌ Не удалось уверенно распознать речь. Попробуйте сказать ещё раз."
+    );
+    assert.ok(!deps.sendMessageFn.calls[0][1].includes("Распознано"));
+    assert.ok(!deps.sendMessageFn.calls[0][1].includes("შიჵმხტი"));
+    // Cleanup still happens even on a rejected transcript.
+    assert.equal(deps.unlinkFn.calls.length, 1);
+  });
+
+  await test("accepts a Russian transcript with digits and forwards it unchanged", async () => {
+    const deps = baseDeps();
+    deps.transcribeFn.impl = async () => "расход 40000 кофе";
+
+    const result = await handleVoiceMessage(1, { file_id: "f1", duration: 10 }, deps);
+
+    assert.equal(result, "расход 40000 кофе");
+    assert.equal(deps.sendMessageFn.calls[0][1], "🎙 Распознано:\n\nрасход 40000 кофе");
+  });
+
+  await test("collapses internal whitespace/newlines in the transcript before validating/routing", async () => {
+    const deps = baseDeps();
+    deps.transcribeFn.impl = async () => "  привет   мир\n\nкак дела  ";
+
+    const result = await handleVoiceMessage(1, { file_id: "f1", duration: 10 }, deps);
+
+    assert.equal(result, "привет мир как дела");
+    assert.equal(deps.sendMessageFn.calls[0][1], "🎙 Распознано:\n\nпривет мир как дела");
+  });
+
   await test("cleanup happens even when unlinkFn itself throws (never propagates)", async () => {
     const deps = baseDeps();
     deps.unlinkFn.impl = async () => {
@@ -227,6 +279,48 @@ async function run() {
 
     const [, message] = deps.sendMessageFn.calls[0];
     assert.ok(!message.includes("ECONNRESET"));
+  });
+
+  await test("return contract: successful transcription returns the recognized text (ready for the listener to route)", async () => {
+    const deps = baseDeps();
+    deps.transcribeFn.impl = async () => "купи хлеб и молоко";
+
+    const result = await handleVoiceMessage(
+      1,
+      { file_id: "f1", duration: 10 },
+      deps
+    );
+
+    assert.equal(typeof result, "string");
+    assert.equal(result, "купи хлеб и молоко");
+  });
+
+  await test("return contract: every rejection/failure path returns null (so the listener never routes it)", async () => {
+    const rejectionScenarios = [
+      (deps) => { deps.transcribeFn.impl = async () => null; },
+      (deps) => { deps.transcribeFn.impl = async () => { throw new Error("x"); }; },
+      (deps) => { deps.downloadFn.impl = async () => { throw new Error("x"); }; },
+      (deps) => { deps.getFileLinkFn.impl = async () => { throw new Error("x"); }; },
+      (deps) => { deps.transcribeFn.impl = async () => "შიჵმხტი მუემიში"; },
+      (deps) => { deps.transcribeFn.impl = async () => "   "; },
+    ];
+
+    for (const applyScenario of rejectionScenarios) {
+      const deps = baseDeps();
+      applyScenario(deps);
+
+      const result = await handleVoiceMessage(1, { file_id: "f1", duration: 10 }, deps);
+      assert.equal(result, null);
+    }
+
+    // Metadata-limit rejections (no download attempted at all).
+    const deps = baseDeps();
+    const overLimitResult = await handleVoiceMessage(
+      1,
+      { file_id: "f1", duration: MAX_VOICE_DURATION_SECONDS + 1 },
+      deps
+    );
+    assert.equal(overLimitResult, null);
   });
 
   if (process.exitCode) {

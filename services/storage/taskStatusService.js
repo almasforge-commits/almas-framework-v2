@@ -1,9 +1,10 @@
 import { supabase } from "../../providers/storage/supabase.js";
 
 export async function updateTaskStatus(taskId, status) {
+  // Read only the fields we need — never select every column into a log path.
   const { data: task, error: readError } = await supabase
     .from("memories")
-    .select("*")
+    .select("id, content, metadata")
     .eq("id", taskId)
     .single();
 
@@ -16,21 +17,21 @@ export async function updateTaskStatus(taskId, status) {
     status,
   };
 
-  console.log("Updating task:", taskId);
-console.log("New metadata:", metadata);
+  const { data, error: updateError } = await supabase
+    .from("memories")
+    .update({ metadata })
+    .eq("id", taskId)
+    .select("id");
 
-const { data, error: updateError } = await supabase
-  .from("memories")
-  .update({ metadata })
-  .eq("id", taskId)
-  .select();
+  // Concise metadata only — never log the full returned database row.
+  console.log(
+    `[task] action=update_status id=${taskId} status=${status} rows=${data?.length ?? 0} ok=${!updateError}`
+  );
 
-console.log("Updated rows:", data);
-
-if (updateError) {
-  console.error("Update error:", updateError);
-  return null;
-}
+  if (updateError) {
+    console.error(`[task] update_status failed id=${taskId}:`, updateError.message || updateError);
+    return null;
+  }
 
   return {
     ...task,
