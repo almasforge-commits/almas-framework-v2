@@ -36,7 +36,7 @@ import { handleVoiceMessage } from "./routes/voiceRoute.js";
 import { saveMemory } from "../services/storage/memoryService.js";
 
 import { classifyMemory } from "../services/storage/memoryClassifier.js";
-import { shouldSaveMemory } from "../services/storage/memoryFilter.js";
+import { shouldSaveMemory, extractLegacyMemorySaveContent } from "../services/storage/memoryFilter.js";
 
 import {
   getActiveTasks,
@@ -840,18 +840,23 @@ if (isYouTubeLink(text)) {
 }
 
 // Память — сохраняется только если ничего выше не сработало, то есть
-// текст не является ни одной из распознанных команд (deструктивной,
+// текст не является ни одной из распознанных команд (деструктивной,
 // финансовой, задачной и т.д.), не похож на неудавшуюся попытку
 // финансовой команды, и AI-роутер уже не сохранил это же сообщение сам
 // (task_create/memory_save в активном режиме) — иначе получилось бы
 // дублирование или неверная классификация по ключевым словам.
 if (!aiOwnership.executedActions.length && !isUnparsedFinanceAttempt && shouldSaveMemory(text)) {
   const memory = classifyMemory(text);
+  const extracted = extractLegacyMemorySaveContent(text);
+  const contentToStore =
+    extracted.kind === "save" && extracted.content
+      ? extracted.content
+      : text;
 
-  await saveMemory({
+  const saved = await saveMemory({
     source: "telegram",
     type: "message",
-    content: text,
+    content: contentToStore,
     metadata: {
       memoryType: memory.memoryType,
       importance: memory.importance,
@@ -863,6 +868,11 @@ if (!aiOwnership.executedActions.length && !isUnparsedFinanceAttempt && shouldSa
       firstName: from.first_name ?? null,
     },
   });
+
+  if (saved) {
+    await bot.sendMessage(chatId, "🧠 Запомнил.");
+    return;
+  }
 }
 
 // AI уже обработал это сообщение (подтверждение(я) уже отправлены выше),

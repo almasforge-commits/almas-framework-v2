@@ -4,6 +4,8 @@
  */
 
 import { createAnswerResult, SOURCE_TRUST } from "./answerContracts.js";
+import { normalizeMemoryFactContent } from "../storage/memoryFilter.js";
+import { dedupeEvidence } from "./evidenceDedupe.js";
 
 function worldSourcesFrom(flags, ranked) {
   if (Array.isArray(flags.worldSources) && flags.worldSources.length) {
@@ -116,9 +118,9 @@ export function composeAnswer(input = {}) {
   }
 
   // Prefer non-world, non-conflict-loser lines for the answer body.
-  const preferred = pickPreferredLines(ranked, conflicts);
+  const preferred = dedupeAnswerLines(pickPreferredLines(ranked, conflicts));
   const answer = preferred
-    .map((e) => e.summary || e.content)
+    .map((e) => formatAnswerLine(e.summary || e.content))
     .filter(Boolean)
     .slice(0, 5)
     .join("\n");
@@ -197,6 +199,20 @@ function pickPreferredLines(ranked, conflicts) {
   // Fall back to any non-world, then world.
   const nonWorld = ranked.filter((e) => e.scope !== "world");
   return nonWorld.length ? nonWorld : ranked;
+}
+
+function dedupeAnswerLines(items) {
+  return dedupeEvidence(items);
+}
+
+function formatAnswerLine(text) {
+  const normalized = normalizeMemoryFactContent(text);
+  if (!normalized) return "";
+  // Avoid rendering leftover imperative wrappers from legacy rows.
+  if (/^(запомни|запомнить|remember)\b/iu.test(normalized)) {
+    return "";
+  }
+  return normalized.endsWith(".") ? normalized : `${normalized}.`;
 }
 
 function toSources(items) {

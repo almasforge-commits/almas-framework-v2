@@ -18,15 +18,54 @@ function getClient() {
   return client;
 }
 
+/**
+ * Sanitize OpenAI / network failures for callers and logs.
+ * Never returns headers, request ids, cookies, or raw stack objects.
+ *
+ * @param {unknown} error
+ * @returns {{ code: string, retryable: boolean }}
+ */
+export function classifyOpenAiError(error) {
+  const status = Number(error?.status ?? error?.statusCode ?? NaN);
+  const msg = String(error?.message ?? error ?? "")
+    .toLowerCase()
+    .slice(0, 500);
+  const codeHint = String(error?.code ?? error?.error?.code ?? "").toLowerCase();
+
+  if (
+    codeHint === "invalid_json_schema" ||
+    /invalid schema|additionalproperties|response_format|json_schema/.test(msg)
+  ) {
+    return { code: "invalid_json_schema", retryable: false };
+  }
+
+  if (status === 401 || status === 403 || /invalid_api_key|authentication/i.test(msg)) {
+    return { code: "auth_error", retryable: false };
+  }
+
+  if (status === 429 || codeHint === "rate_limit_exceeded") {
+    return { code: "rate_limited", retryable: true };
+  }
+
+  if (
+    status >= 500 ||
+    /timeout|etimedout|econnreset|econnrefused|network|fetch failed|socket/.test(
+      msg
+    )
+  ) {
+    return { code: "provider_unavailable", retryable: true };
+  }
+
+  return { code: "provider_error", retryable: true };
+}
+
 export async function askAI(
   systemPrompt,
   userPrompt,
   schema = null,
   options = {}
 ) {
-
   try {
-
     const request = {
       model: options.model ?? DEFAULT_MODEL,
 
@@ -43,23 +82,22 @@ export async function askAI(
     };
 
     if (schema) {
-
       request.text = {
         format: {
           type: "json_schema",
           name: schema.name,
           schema: schema.schema,
+          ...(schema.strict === true || options.strict === true
+            ? { strict: true }
+            : {}),
         },
       };
-
     } else {
-
       request.text = {
         format: {
           type: "text",
         },
       };
-
     }
 
     const response = await getClient().responses.create(request);
@@ -69,27 +107,42 @@ export async function askAI(
     }
 
     if (schema) {
-
       try {
         return JSON.parse(response.output_text);
-      } catch (error) {
-
-        console.error("JSON Parse Error:", error);
-        console.error(response.output_text);
-
+      } catch {
+        if (options.logErrors !== false) {
+          console.error("[openai] provider_error code=invalid_json retryable=false");
+        }
+        if (options.throwClassified === true) {
+          const err = new Error("invalid_json");
+          err.code = "invalid_json";
+          err.retryable = false;
+          throw err;
+        }
         return null;
       }
-
     }
 
     return response.output_text.trim();
-
   } catch (error) {
+    if (error?.code && typeof error.retryable === "boolean" && options.throwClassified) {
+      throw error;
+    }
 
-    console.error("OpenAI Error:");
-    console.error(error);
+    const classified = classifyOpenAiError(error);
+    if (options.logErrors !== false) {
+      console.error(
+        `[openai] provider_error code=${classified.code} retryable=${classified.retryable}`
+      );
+    }
+
+    if (options.throwClassified === true) {
+      const err = new Error(classified.code);
+      err.code = classified.code;
+      err.retryable = classified.retryable;
+      throw err;
+    }
 
     return null;
   }
-
 }

@@ -4,6 +4,7 @@
  */
 
 import { createEvidenceItem } from "./answerContracts.js";
+import { normalizeMemoryFactContent } from "../storage/memoryFilter.js";
 
 /**
  * @param {object|null} pending - clarification pending record
@@ -288,22 +289,36 @@ export function collectDomainEvidence(source, payload) {
 
   if (source === "memory" && Array.isArray(payload)) {
     for (const m of payload.slice(0, 10)) {
+      const content = normalizeMemoryFactContent(m.content ?? m.text ?? "");
+      if (!content) continue;
+      // Actor-scoped legacy memory is personal evidence. Raw cosine
+      // similarity alone undervalues direct preference matches (e.g. 0.3–0.5
+      // after "вспомни…" noise) and fails minAnswerConfidence — floor only
+      // for this source mapping, not the global Answer Engine threshold.
+      const raw = clamp(m.similarity ?? m.confidence, 0.7);
+      const confidence = Math.max(raw, 0.75);
+      const domain = looksLikePreferenceMemory(content)
+        ? "preferences"
+        : "memory";
+      const createdAt = parseMemoryTimestamp(m);
       items.push(
         createEvidenceItem({
-          id: m.id ?? null,
+          id: m.id != null ? `memory:${m.id}` : null,
           source: "memory",
-          scope: "domain",
-          confidence: clamp(m.similarity ?? m.confidence, 0.7),
-          domain: "Memory",
-          factId: m.id ?? null,
+          scope: "personal",
+          confidence,
+          timestamp: createdAt ?? Date.now(),
+          domain,
+          factId: m.id != null ? String(m.id) : null,
           reason: "memory_hit",
           provenance: {
             sourceType: "memory_service",
             provider: "memory",
             retrievedAt: Date.now(),
+            confidence,
           },
-          content: String(m.content ?? m.text ?? ""),
-          summary: String(m.content ?? m.text ?? "").slice(0, 280),
+          content,
+          summary: content.slice(0, 280),
         })
       );
     }
@@ -318,4 +333,20 @@ function clamp(n, fallback) {
   if (x < 0) return 0;
   if (x > 1) return 1;
   return x;
+}
+
+function looksLikePreferenceMemory(content) {
+  return /нрав|предпочит|like|prefer|любл|люби/iu.test(String(content ?? ""));
+}
+
+function parseMemoryTimestamp(m) {
+  if (!m || typeof m !== "object") return null;
+  if (typeof m.timestamp === "number" && Number.isFinite(m.timestamp)) {
+    return m.timestamp;
+  }
+  const raw = m.created_at ?? m.createdAt ?? null;
+  if (raw == null) return null;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  const ms = Date.parse(String(raw));
+  return Number.isFinite(ms) ? ms : null;
 }

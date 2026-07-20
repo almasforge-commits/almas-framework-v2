@@ -70,7 +70,10 @@ export function createTelegramAnswerEngine(overrides = {}) {
     getTasksSnapshot:
       overrides.getTasksSnapshot ?? (async () => getActiveTasks()),
     searchKnowledgeFn: overrides.searchKnowledgeFn ?? searchKnowledge,
-    searchMemoryFn: overrides.searchMemoryFn ?? searchMemories,
+    searchMemoryFn:
+      overrides.searchMemoryFn ??
+      (async (query, { actorKey } = {}) =>
+        searchMemories(query, { actorKey })),
     includeDebug: overrides.includeDebug === true,
     nowFn: overrides.nowFn,
   });

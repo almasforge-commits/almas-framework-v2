@@ -182,8 +182,8 @@ export function detectIncompleteIntent(text) {
     };
   }
 
-  const memoryExact = /^(запомни|запомнить)$/i;
-  const memoryPrefix = /^(запомни|запомнить)[:\s]+$/i;
+  const memoryExact = /^(запомни|запомнить|remember)$/i;
+  const memoryPrefix = /^(запомни|запомнить|remember)[:\s]+$/i;
   if (memoryExact.test(lower) || memoryPrefix.test(trimmed)) {
     return {
       kind: "memory_save",
@@ -200,8 +200,16 @@ export function detectIncompleteIntent(text) {
     return null;
   }
 
-  const memoryWithContent = /^(запомни|запомнить)\s+(.+)$/i.exec(trimmed);
-  if (memoryWithContent && memoryWithContent[2].trim()) {
+  // Explicit remember-with-content (incl. "Запомни, что …" / "Remember that …")
+  // is handled by the legacy memory save path — do not start clarification.
+  const memoryWithContent =
+    /^(запомни|запомнить)\s*,\s*что\s+.+$/i.test(trimmed) ||
+    /^(запомни|запомнить)\s+что\s+.+$/i.test(trimmed) ||
+    /^(запомни|запомнить)\s*,\s*.+$/i.test(trimmed) ||
+    /^(запомни|запомнить)\s+.+$/i.test(trimmed) ||
+    /^remember\s+that\s+.+$/i.test(trimmed) ||
+    /^remember\s+.+$/i.test(trimmed);
+  if (memoryWithContent) {
     return null;
   }
 

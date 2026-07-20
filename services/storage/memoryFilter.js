@@ -12,17 +12,105 @@ import { isMeaninglessShortInput } from "../../core/utils/isMeaninglessShortInpu
 const DESTRUCTIVE_TEXT_COMMANDS = ["удалить все знания"];
 
 /**
+ * Deterministic legacy memory-save command parse.
+ * - incomplete: bare "Запомни" / "Remember" → ask for content
+ * - save: prefix forms → content is everything after the command prefix
+ * - none: not an explicit memory-save command
+ *
+ * @param {string} text
+ * @returns {{ kind: "incomplete"|"save"|"none", content: string|null }}
+ */
+export function extractLegacyMemorySaveContent(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) {
+    return { kind: "none", content: null };
+  }
+
+  const lower = trimmed.toLowerCase();
+
+  if (
+    /^(запомни|запомнить|remember)$/i.test(trimmed) ||
+    /^(запомни|запомнить)[:\s]+$/i.test(trimmed) ||
+    /^remember[:\s]+$/i.test(trimmed)
+  ) {
+    return { kind: "incomplete", content: null };
+  }
+
+  const patterns = [
+    /^(запомни|запомнить)\s*,\s*что\s+(.+)$/is,
+    /^(запомни|запомнить)\s+что\s+(.+)$/is,
+    /^(запомни|запомнить)\s*,\s*(.+)$/is,
+    /^(запомни|запомнить)\s+(.+)$/is,
+    /^remember\s+that\s+(.+)$/is,
+    /^remember\s+(.+)$/is,
+  ];
+
+  for (const re of patterns) {
+    const match = re.exec(trimmed);
+    if (!match) continue;
+    const content = capitalizeMemoryFact(
+      String(match[match.length - 1] ?? "").trim()
+    );
+    if (!content) continue;
+    // Avoid treating "запомни что" alone (no payload) as save.
+    if (/^(что)$/i.test(content)) {
+      return { kind: "incomplete", content: null };
+    }
+    return { kind: "save", content };
+  }
+
+  // Prefix markers used by Answer gate / shouldSaveMemory callers.
+  if (
+    lower.startsWith("запомни") ||
+    lower.startsWith("запомнить") ||
+    lower.startsWith("remember")
+  ) {
+    // Unrecognized shape of an explicit remember command — do not treat as open note.
+    return { kind: "incomplete", content: null };
+  }
+
+  return { kind: "none", content: null };
+}
+
+/**
+ * Persistable memory fact text: strip RU/EN remember-command prefixes.
+ * Existing raw command rows can be normalized on read with the same helper.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function normalizeMemoryFactContent(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return "";
+
+  const extracted = extractLegacyMemorySaveContent(trimmed);
+  if (extracted.kind === "save" && extracted.content) {
+    return extracted.content;
+  }
+
+  // Fallback for odd punctuation still carrying an imperative prefix.
+  const stripped = trimmed
+    .replace(/^(запомни|запомнить)\s*,?\s*(что\s+)?/iu, "")
+    .replace(/^remember\s+(that\s+)?/iu, "")
+    .trim();
+
+  if (stripped && stripped !== trimmed) {
+    return capitalizeMemoryFact(stripped);
+  }
+
+  return capitalizeMemoryFact(trimmed);
+}
+
+function capitalizeMemoryFact(text) {
+  const s = String(text ?? "").trim();
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
  * Deterministic eligibility guard: decides whether a piece of
  * already-resolved text (typed or voice) should be automatically saved
  * as a Memory note.
- *
- * This does NOT implement Finance/Task/Knowledge/Chat business logic —
- * it only recognizes when text belongs to one of those command surfaces
- * (by calling the same parsers/detectors those features already use, or
- * matching the same command prefixes routeText() does) so recognized
- * command-like input is never accidentally stored as a note, even if a
- * downstream parser for that command later fails to fully parse it.
- * Normal notes and ideas are always left eligible.
  *
  * @param {string} text
  * @returns {boolean}
@@ -36,6 +124,10 @@ export function shouldSaveMemory(text) {
   if (DESTRUCTIVE_TEXT_COMMANDS.includes(normalized)) return false;
   if (isMenuNavigationCommand(text)) return false;
   if (isMeaninglessShortInput(text)) return false;
+
+  // Explicit bare remember → clarification asks; do not auto-save the verb.
+  const memoryCmd = extractLegacyMemorySaveContent(text);
+  if (memoryCmd.kind === "incomplete") return false;
 
   // Finance: any recognized query intent (balance/history/statistics/
   // analytics/delete_last) or any expense/income trigger word — even if
@@ -59,9 +151,7 @@ export function shouldSaveMemory(text) {
   if (value.startsWith("выполнено ")) return false;
   if (value === "выполненные задачи") return false;
 
-  // Finance report commands. Most of these are also covered by
-  // parseFinanceQuery() above; kept explicit too so this guard doesn't
-  // depend on that parser's exact intent set staying in sync.
+  // Finance report commands.
   if (value === "баланс") return false;
   if (value === "история") return false;
   if (value === "статистика") return false;
@@ -70,7 +160,9 @@ export function shouldSaveMemory(text) {
     value === "расходы за сегодня" ||
     value === "расходы за неделю" ||
     value === "расходы за месяц"
-  ) return false;
+  ) {
+    return false;
+  }
 
   if (isYouTubeLink(text)) return false;
 

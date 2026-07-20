@@ -115,11 +115,15 @@ export async function handleClarificationTurn(input = {}, options = {}) {
     return { handled: true, reason: result.status };
   }
 
-  // 2) Incomplete task/memory — user-visible only when AI router is active.
-  // Shadow: do not create clarification flows for these plans.
+  // 2) Incomplete task/memory.
+  // Bare "Запомни" clarification is allowed in any AI_ROUTER_MODE (legacy UX).
+  // Incomplete task_create remains active-mode only.
   const incomplete = detectIncompleteIntent(text);
   if (incomplete) {
-    if (!aiRouterActiveFn()) {
+    if (
+      incomplete.kind !== "memory_save" &&
+      !aiRouterActiveFn()
+    ) {
       console.log(
         `[clarification] shadow skip task/memory kind=${incomplete.kind}`
       );

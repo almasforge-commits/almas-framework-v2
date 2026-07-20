@@ -10,6 +10,14 @@ import {
   collectWorldEvidence,
   collectDomainEvidence,
 } from "./evidenceCollector.js";
+import { filterMemoriesForIntent } from "./memoryIntentFilter.js";
+import {
+  isPreferenceLikeMemory,
+  isTaskMemoryRow,
+  isFinanceLikeMemory,
+} from "./memoryIntentFilter.js";
+import { isUserFact } from "./memoryQuality.js";
+import { dedupeEvidence } from "./evidenceDedupe.js";
 
 /**
  * Retrieve evidence in fixed order:
@@ -81,7 +89,9 @@ export async function retrieveAnswerEvidence(plan, deps = {}, config = {}) {
           : Array.isArray(result)
             ? result
             : [];
-        const items = collectPersonalEvidence(hits).slice(0, limitPersonal);
+        const items = collectPersonalEvidence(hits)
+          .filter((e) => personalEvidenceAllowed(e, plan.intent))
+          .slice(0, limitPersonal);
         if (items.length) {
           evidence.push(...items);
           flags.usedPersonalKnowledge = true;
@@ -242,9 +252,21 @@ export async function retrieveAnswerEvidence(plan, deps = {}, config = {}) {
     if (wanted.has("memory") && typeof deps.searchMemoryFn === "function") {
       try {
         const snap = await deps.searchMemoryFn(query, { actorKey });
-        const items = collectDomainEvidence("memory", snap).slice(
+        const scoped = filterMemoriesForIntent(
+          Array.isArray(snap) ? snap : [],
+          plan.intent
+        );
+        const rawCount = Array.isArray(snap) ? snap.length : 0;
+        const items = collectDomainEvidence("memory", scoped).slice(
           0,
           limitDomain
+        );
+        const topConf = items.reduce(
+          (max, e) => Math.max(max, Number(e.confidence) || 0),
+          0
+        );
+        console.log(
+          `[answer] memory_evidence queryChars=${String(query || "").length} scopedHits=${rawCount} intentFiltered=${scoped.length} mapped=${items.length} topConf=${topConf} intent=${plan.intent || "general"}`
         );
         if (items.length) {
           evidence.push(...items);
@@ -257,5 +279,18 @@ export async function retrieveAnswerEvidence(plan, deps = {}, config = {}) {
   }
 
   flags.usedDomains = [...new Set(flags.usedDomains)];
-  return { evidence, flags };
+  // Collapse duplicate facts before ranking/compose consumers.
+  return { evidence: dedupeEvidence(evidence), flags };
+}
+
+function personalEvidenceAllowed(item, intent) {
+  const content = item?.content || item?.summary || "";
+  const kind = String(intent || "general");
+  if (kind === "preferences_query") {
+    return isPreferenceLikeMemory(content) && isUserFact(content);
+  }
+  if (kind === "about_me_query" || kind === "memory_query") {
+    return isUserFact(content);
+  }
+  return !isTaskMemoryRow({}, content) && !isFinanceLikeMemory(content);
 }

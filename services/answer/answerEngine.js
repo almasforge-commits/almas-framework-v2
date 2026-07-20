@@ -11,6 +11,7 @@ import { retrieveAnswerEvidence } from "./answerRetriever.js";
 import { rankEvidence } from "./evidenceRanker.js";
 import { resolveEvidenceConflicts } from "./conflictResolver.js";
 import { composeAnswer } from "./answerComposer.js";
+import { dedupeEvidence } from "./evidenceDedupe.js";
 import {
   validateAnswerRequest,
   validateAnswerResult,
@@ -92,8 +93,10 @@ export function createAnswerEngine(deps = {}) {
       nowMs: deps.nowFn ? deps.nowFn() : Date.now(),
     });
 
+    const uniqueRanked = dedupeEvidence(ranked);
+
     const composed = composeAnswer({
-      rankedEvidence: ranked,
+      rankedEvidence: uniqueRanked,
       conflicts,
       flags,
       plan,

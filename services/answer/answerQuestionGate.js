@@ -4,12 +4,42 @@
  */
 
 import { detectDeterministicIntent } from "../inbox/deterministicIntentDetector.js";
+import { extractLegacyMemorySaveContent } from "../storage/memoryFilter.js";
 
 const READ_ONLY_TYPES = new Set(["chat", "search"]);
 
-/** Information-seeking cues (RU/EN). Not used for execution phrases. */
-const QUESTION_HINT =
-  /(?:^|[?\s])(\?|что\b|как\b|какие\b|какой\b|какая\b|какое\b|когда\b|где\b|почему\b|зачем\b|сколько\b|расскажи\b|who\b|what\b|when\b|where\b|why\b|how\b|which\b|tell\s+me\b|do\s+you\s+know\b|what\s+do\s+you\s+know\b|what\s+did\s+i\b|what\s+am\s+i\b|what\s+projects\b|what\s+ideas\b)/i;
+/** Unicode-safe question tokens (Cyrillic + Latin). No JS \\b on Cyrillic. */
+const QUESTION_TOKENS = new Set([
+  "что",
+  "как",
+  "какие",
+  "какой",
+  "какая",
+  "какое",
+  "когда",
+  "где",
+  "почему",
+  "зачем",
+  "сколько",
+  "расскажи",
+  "who",
+  "what",
+  "when",
+  "where",
+  "why",
+  "how",
+  "which",
+]);
+
+const MULTIWORD_QUESTION_HINTS = [
+  /^tell\s+me\b/i,
+  /\bdo\s+you\s+know\b/i,
+  /\bwhat\s+do\s+you\s+know\b/i,
+  /\bwhat\s+did\s+i\b/i,
+  /\bwhat\s+am\s+i\b/i,
+  /\bwhat\s+projects\b/i,
+  /\bwhat\s+ideas\b/i,
+];
 
 const PREFIX_STRIP = [
   { prefix: "спроси ", type: "chat" },
@@ -17,6 +47,35 @@ const PREFIX_STRIP = [
   { prefix: "найти ", type: "search" },
   { prefix: "вспомни ", type: "search" },
 ];
+
+/**
+ * Normalize text into tokens using Unicode letter/number boundaries.
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function tokenizeQuestionText(text) {
+  return String(text ?? "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Unicode-safe open-question detector (replaces Cyrillic-unsafe \\b regex).
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function looksLikeOpenQuestion(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return false;
+  if (trimmed.endsWith("?")) return true;
+  for (const re of MULTIWORD_QUESTION_HINTS) {
+    if (re.test(trimmed)) return true;
+  }
+  const tokens = tokenizeQuestionText(trimmed);
+  return tokens.some((t) => QUESTION_TOKENS.has(t));
+}
 
 /**
  * Classify whether Telegram text should use the read-only Answer Engine.
@@ -35,6 +94,17 @@ export function classifyAnswerRouteIntent(text, deps = {}) {
       reason: "empty",
       query: null,
       actionType: null,
+    };
+  }
+
+  // Explicit memory-save commands are never questions.
+  const memoryCmd = extractLegacyMemorySaveContent(trimmed);
+  if (memoryCmd.kind === "save" || memoryCmd.kind === "incomplete") {
+    return {
+      useAnswerEngine: false,
+      reason: "memory_save_command",
+      query: null,
+      actionType: "memory_save",
     };
   }
 
@@ -125,7 +195,7 @@ export function classifyAnswerRouteIntent(text, deps = {}) {
   }
 
   // Detector returned null (escalate) or unrecognized — only open questions.
-  if (trimmed.endsWith("?") || QUESTION_HINT.test(trimmed)) {
+  if (looksLikeOpenQuestion(trimmed)) {
     return {
       useAnswerEngine: true,
       reason: "question_pattern",

@@ -11,6 +11,7 @@ import {
   createExtractedItem,
   createExtractionResult,
   UNIVERSAL_EXTRACTION_JSON_SCHEMA,
+  normalizeTransportEntities,
 } from "./universalExtractionContracts.js";
 import { validateExtractedItems } from "./universalExtractionValidator.js";
 import { sanitizeUniversalExtraction } from "./universalExtractionSanitizer.js";
@@ -51,6 +52,8 @@ Rules:
 - Idea entities: title, summary, tags, relatedProject.
 - Health entities: metric, value, unit, secondaryValue (e.g. blood pressure 125/80).
 - Project entities: projectName, update, statusHint.
+- entities is a fixed object: unused scalar fields must be null; unused tags/entityExtras must be [].
+- Put unknown leftover fields only in entityExtras as {key,value} rows (no free-form maps).
 - confidence is 0..1. temporalRaw is a short date phrase from the text, or null.
 - Do not invent domain writes. Extraction only.`;
 }
@@ -64,7 +67,7 @@ function mapAiItem(raw) {
     kind: raw?.kind,
     content: raw?.content ?? "",
     confidence: raw?.confidence,
-    entities: raw?.entities && typeof raw.entities === "object" ? raw.entities : {},
+    entities: normalizeTransportEntities(raw?.entities),
     temporal: { raw: raw?.temporalRaw ?? null },
     requiresClarification: Boolean(raw?.requiresClarification),
     clarificationReason: raw?.clarificationReason ?? null,
@@ -351,7 +354,13 @@ function needsMediumTier(validated, cheapOk) {
 
 async function runExtractionProvider(provider, normalized, model, maxItems) {
   if (!provider?.run) {
-    return { ok: false, reason: "no_provider", result: null, usage: null };
+    return {
+      ok: false,
+      reason: "no_provider",
+      retryable: false,
+      result: null,
+      usage: null,
+    };
   }
 
   let response;
@@ -365,13 +374,20 @@ async function runExtractionProvider(provider, normalized, model, maxItems) {
       { model }
     );
   } catch {
-    return { ok: false, reason: "provider_threw", result: null, usage: null };
+    return {
+      ok: false,
+      reason: "provider_threw",
+      retryable: true,
+      result: null,
+      usage: null,
+    };
   }
 
   if (!response?.ok || !response.result || !Array.isArray(response.result.items)) {
     return {
       ok: false,
       reason: response?.reason || "invalid_response",
+      retryable: response?.retryable !== false,
       result: null,
       usage: response?.usage || null,
     };
@@ -380,29 +396,41 @@ async function runExtractionProvider(provider, normalized, model, maxItems) {
   return {
     ok: true,
     reason: null,
+    retryable: true,
     result: response.result,
     usage: response.usage || null,
   };
 }
 
+function shouldRetryExtraction(providerResult) {
+  if (!providerResult || providerResult.ok) return false;
+  if (providerResult.retryable === false) return false;
+  if (providerResult.reason === "invalid_json_schema") return false;
+  return true;
+}
+
 function createLazyOpenAiExtractionProvider() {
+  let loggedProviderError = false;
   return {
     name: "openai-extraction",
     async run({ systemPrompt, userPrompt, jsonSchema }, { model }) {
-      const { askAI } = await import("../../providers/ai/openaiProvider.js");
+      const { askAI, classifyOpenAiError } = await import(
+        "../../providers/ai/openaiProvider.js"
+      );
       const startedAt = Date.now();
       try {
         const raw = await askAI(
           systemPrompt,
           userPrompt,
           jsonSchema || UNIVERSAL_EXTRACTION_JSON_SCHEMA,
-          { model }
+          { model, throwClassified: true, logErrors: false }
         );
         if (!raw || typeof raw !== "object") {
           return {
             ok: false,
             result: null,
             reason: "invalid_response",
+            retryable: true,
             usage: { model, latencyMs: Date.now() - startedAt },
           };
         }
@@ -412,10 +440,21 @@ function createLazyOpenAiExtractionProvider() {
           usage: { model, latencyMs: Date.now() - startedAt },
         };
       } catch (error) {
+        const classified =
+          error?.code && typeof error.retryable === "boolean"
+            ? { code: error.code, retryable: error.retryable }
+            : classifyOpenAiError(error);
+        if (!loggedProviderError) {
+          loggedProviderError = true;
+          console.error(
+            `[universal-extraction] provider_error code=${classified.code} retryable=${classified.retryable}`
+          );
+        }
         return {
           ok: false,
           result: null,
-          reason: error?.message ? "provider_error" : "provider_error",
+          reason: classified.code || "provider_error",
+          retryable: classified.retryable !== false,
           usage: { model, latencyMs: Date.now() - startedAt },
         };
       }
@@ -506,17 +545,24 @@ export async function extractUniversalInformation(rawText, options = {}) {
     let validated = validateExtractedItems(rawItems, { maxItems });
 
     if (needsMediumTier(validated, cheap.ok)) {
-      const medium = await runExtractionProvider(
-        activeProvider,
-        normalized.normalized,
-        mediumModel,
-        maxItems
-      );
-      if (medium.ok) {
-        tier = "medium";
-        rawItems = (medium.result.items || []).map(mapAiItem);
-        validated = validateExtractedItems(rawItems, { maxItems });
-      } else if (!cheap.ok) {
+      const mayRetryProvider = cheap.ok || shouldRetryExtraction(cheap);
+      if (mayRetryProvider) {
+        const medium = await runExtractionProvider(
+          activeProvider,
+          normalized.normalized,
+          mediumModel,
+          maxItems
+        );
+        if (medium.ok) {
+          tier = "medium";
+          rawItems = (medium.result.items || []).map(mapAiItem);
+          validated = validateExtractedItems(rawItems, { maxItems });
+        } else if (!cheap.ok) {
+          tier = "fallback";
+          validated = validateExtractedItems(deterministic, { maxItems });
+        }
+      } else {
+        // Deterministic schema/config errors must not hit a second model.
         tier = "fallback";
         validated = validateExtractedItems(deterministic, { maxItems });
       }
