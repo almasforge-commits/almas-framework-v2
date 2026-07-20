@@ -186,7 +186,7 @@ export async function findInboxItemByRequestKey(requestKey, deps = {}) {
 }
 
 /**
- * @param {{ actorKey?, sourceType?, status?, informationKind?, limit?, offset? }} options
+ * @param {{ actorKey?, telegramUserId?, sourceType?, status?, informationKind?, limit?, offset? }} options
  */
 export async function listInboxItems(options = {}, deps = {}) {
   const client = deps.supabase ?? supabase;
@@ -205,6 +205,9 @@ export async function listInboxItems(options = {}, deps = {}) {
     .range(offset, offset + limit - 1);
 
   if (options.actorKey) query = query.eq("actor_key", options.actorKey);
+  if (options.telegramUserId != null && options.telegramUserId !== "") {
+    query = query.eq("telegram_user_id", Number(options.telegramUserId));
+  }
   if (options.sourceType) query = query.eq("source_type", options.sourceType);
   if (options.status) query = query.eq("status", options.status);
   if (options.informationKind) {

@@ -5,6 +5,7 @@ import type {
   FinanceSummary,
   FinanceTransaction,
 } from "../api/apiTypes";
+import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
 import { DemoNotice } from "../components/DemoNotice";
 import { ErrorState } from "../components/ErrorState";
 import { Header } from "../components/Header";
@@ -23,11 +24,11 @@ export function FinancePage() {
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
 
   const load = () => {
     setLoading(true);
-    setError(null);
+    setErrorUi(null);
     Promise.all([
       apiClient.getFinanceSummary(period),
       apiClient.getFinanceTransactions(period),
@@ -36,7 +37,7 @@ export function FinancePage() {
         setSummary(nextSummary);
         setTransactions(nextTx);
       })
-      .catch(() => setError("Ошибка загрузки финансов"))
+      .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
   };
 
@@ -69,14 +70,14 @@ export function FinancePage() {
         </div>
 
         {loading ? <LoadingState /> : null}
-        {error ? <ErrorState description={error} onRetry={load} /> : null}
+        {errorUi ? <ErrorState errorUi={errorUi} onRetry={load} /> : null}
 
-        {summary && !loading ? (
+        {summary && !loading && !errorUi ? (
           <div className="grid grid-cols-1 gap-3">
             <MetricCard
               label="Текущий баланс"
               value={`${summary.balance.toLocaleString("ru-RU")} ${summary.currency}`}
-              hint="Демо"
+              hint={summary.demo ? "Демо" : undefined}
             />
             <div className="grid grid-cols-2 gap-3">
               <MetricCard

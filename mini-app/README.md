@@ -4,7 +4,7 @@ Client-only presentation shell for viewing ALMAS data inside Telegram (and in a 
 
 ## Purpose
 
-Provide a mobile-first Mini App UI with navigation, mock dashboard screens, Telegram WebApp theme integration, and a typed API boundary. **ALMAS Core / the Node bot remains the source of business logic.** This app does not own domain storage.
+Provide a mobile-first Mini App UI with navigation, Telegram WebApp theme integration, and a typed API boundary. **ALMAS Core / the Node bot remains the source of business logic.** This app does not own domain storage.
 
 ## Architecture
 
@@ -13,16 +13,29 @@ Telegram WebApp / Browser
         ↓
    mini-app/ (Vite + React + TypeScript)
         ↓
-   apiClient → mockApi (v1) | future HTTPS ALMAS backend API
+   apiClient → mockApi (default) | realApi (live)
         ↓
-   ALMAS Core services (bot) → Supabase / storage
+   ALMAS read-only HTTP API (npm run api)
+        ↓
+   ALMAS Core services → Supabase / storage
 ```
 
-- Presentation only: pages consume `apiClient`, never hardcode privileged storage access.
+- Pages consume `apiClient` only — they do not know mock vs live.
 - Direct privileged Supabase access from the Mini App is **forbidden**.
-- Current data is **mock / demo** only.
+- Bot token and Supabase service-role keys must never appear in the Mini App.
 
-## Development
+## Configuration
+
+Vite env (use `.env.local`, gitignored — do not commit secrets):
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `VITE_ALMAS_API_MODE` | `mock` | `mock` or `live` |
+| `VITE_ALMAS_API_URL` | empty | Base URL of the read-only API (e.g. `http://127.0.0.1:8787`) |
+
+See `.env.example`.
+
+## Development (mock — default)
 
 ```bash
 cd mini-app
@@ -30,9 +43,31 @@ npm install
 npm run dev
 ```
 
-Open the printed local URL (default `http://localhost:5173`).
+Open `http://localhost:5173`. Demo data loads without Telegram or the API process.
 
-## Build
+## Local live verification
+
+Terminal A (bot repo root):
+
+```bash
+npm run api
+```
+
+Terminal B:
+
+```bash
+cd mini-app
+# create .env.local (not committed):
+# VITE_ALMAS_API_MODE=live
+# VITE_ALMAS_API_URL=http://127.0.0.1:8787
+npm run dev
+```
+
+- Browser without Telegram: shows **«Откройте приложение через Telegram»** (auth-required), no crash.
+- Inside Telegram with valid `initData`: requests use `Authorization: tma <raw initData>` only.
+- CORS: set `ALMAS_API_CORS_ORIGIN=http://localhost:5173` on the API process when needed (server env, not Mini App).
+
+## Build / test
 
 ```bash
 cd mini-app
@@ -41,48 +76,28 @@ npm run test
 npm run build
 ```
 
-Static output lands in `mini-app/dist/` (gitignored).
+## Auth security
 
-## Browser preview
+- Send **only** raw `window.Telegram.WebApp.initData` as `Authorization: tma <rawInitData>` (ALMAS API convention).
+- Never send `initDataUnsafe`, user-id headers, cookies, or query identity.
+- Backend validates HMAC; client never trusts unsafe display fields as identity.
 
-Works without Telegram:
+## Error UX
 
-- Fallback user (`Гость`)
-- “Browser preview” indicator on Home
-- Theme CSS fallbacks for light/dark
+| Condition | UI |
+|-----------|-----|
+| 401 / missing initData | Откройте приложение через Telegram |
+| 503 | Данные временно недоступны |
+| Network | Retry state |
+| Malformed envelope | Controlled error (no raw server text) |
 
-## Telegram preview requirements
+## Read-only
 
-1. Host the built app on a **public HTTPS** URL.
-2. Open from Telegram (BotFather Mini App / `web_app` button), not only a desktop browser.
-3. Telegram injects `window.Telegram.WebApp`; the app calls `ready()` and `expand()` when present.
+No PATCH/POST from the Mini App. Task checkboxes update local React state only in mock; live `patchTask` is a no-op.
 
-## Future API connection
+## Future deployment
 
-Planned backend routes (not called yet):
-
-- `GET /api/dashboard`
-- `GET /api/inbox`
-- `GET /api/finance/summary`
-- `GET /api/finance/transactions`
-- `GET /api/tasks`
-- `PATCH /api/tasks/:id`
-- `GET /api/knowledge`
-
-Swap `mockApi` behind `apiClient` for a real HTTP client. Pages should not need a rewrite.
-
-## Telegram `initData` security rule
-
-- `initDataUnsafe` is **display-only** (greeting / UI personalization).
-- Never treat `initDataUnsafe` as authenticated server identity.
-- Future authenticated requests must send the raw signed `initData` string to the ALMAS backend; the backend validates Telegram’s signature before trusting user identity.
-- Never put bot tokens or Supabase service-role keys in the Mini App.
-
-## Deployment (not done in Foundation v1)
-
-1. Deploy `mini-app/dist` to a public **HTTPS** host.
-2. Set `ALMAS_WEB_APP_URL=<that HTTPS URL>` in the bot environment (see `config/webapp.js`).
-3. Later, the existing menu button **«🌐 Открыть ALMAS»** becomes a Telegram `web_app` button when the URL is valid.
-4. Do not register with BotFather / do not set production URL until deliberately deploying.
-
-Live Telegram menu behavior is unchanged until `ALMAS_WEB_APP_URL` is configured.
+1. Deploy `mini-app/dist` to public HTTPS.
+2. Deploy/run the ALMAS API behind HTTPS; set `VITE_ALMAS_API_URL` at Mini App build time; `VITE_ALMAS_API_MODE=live`.
+3. Set bot `ALMAS_WEB_APP_URL` to the Mini App HTTPS URL (`config/webapp.js`).
+4. Configure API CORS allowlist for the Mini App origin.

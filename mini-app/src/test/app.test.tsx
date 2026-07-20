@@ -49,7 +49,9 @@ function installTelegram(partial?: Partial<TelegramWebApp>) {
 describe("ALMAS Mini App foundation", () => {
   it("works without Telegram global", async () => {
     render(<App />);
-    expect(await screen.findByText(/Добро пожаловать|Привет, Гость/)).toBeInTheDocument();
+    expect(await screen.findByTestId("dashboard-greeting")).toHaveTextContent(
+      /Гость|Доброе|Добрый|Доброй/
+    );
     expect(screen.getByTestId("browser-preview")).toBeInTheDocument();
   });
 
@@ -65,12 +67,16 @@ describe("ALMAS Mini App foundation", () => {
   it("shows Telegram first name in greeting", async () => {
     installTelegram();
     render(<App />);
-    expect(await screen.findByText("Привет, Алмас")).toBeInTheDocument();
+    expect(await screen.findByTestId("dashboard-greeting")).toHaveTextContent(
+      "Алмас"
+    );
   });
 
   it("shows fallback user in browser mode", async () => {
     render(<App />);
-    expect(await screen.findByText("Привет, Гость")).toBeInTheDocument();
+    expect(await screen.findByTestId("dashboard-greeting")).toHaveTextContent(
+      "Гость"
+    );
   });
 
   it("bottom navigation contains exactly five primary tabs", async () => {
@@ -86,7 +92,7 @@ describe("ALMAS Mini App foundation", () => {
   it("changing tabs renders the correct page", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByText(/Добро пожаловать|Привет/);
+    await screen.findByTestId("dashboard-greeting");
     await user.click(screen.getByRole("link", { name: "Inbox" }));
     expect(await screen.findByRole("heading", { name: "Inbox" })).toBeInTheDocument();
     await user.click(screen.getByRole("link", { name: "Финансы" }));
@@ -96,7 +102,7 @@ describe("ALMAS Mini App foundation", () => {
   it("unknown route returns to Home", async () => {
     window.history.pushState({}, "", "/not-a-real-route");
     render(<App />);
-    expect(await screen.findByText(/Добро пожаловать|Привет/)).toBeInTheDocument();
+    expect(await screen.findByTestId("home-dashboard")).toBeInTheDocument();
   });
 
   it("maps Telegram theme values to CSS variables", () => {

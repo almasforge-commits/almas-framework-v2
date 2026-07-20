@@ -1,6 +1,9 @@
 import { MOCK_DEMO_NOTICE } from "../api/mockApi";
+import { isMockMode } from "../config/env";
 
 export function DemoNotice() {
+  if (!isMockMode()) return null;
+
   return (
     <p
       className="rounded-xl border border-dashed border-black/10 bg-tg-secondary/60 px-3 py-2 text-xs leading-relaxed text-tg-hint"

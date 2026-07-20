@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/apiClient";
 import type { Task } from "../api/apiTypes";
+import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
 import { DemoNotice } from "../components/DemoNotice";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
@@ -11,15 +12,15 @@ import { SectionCard } from "../components/SectionCard";
 export function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
 
   const load = () => {
     setLoading(true);
-    setError(null);
+    setErrorUi(null);
     apiClient
       .getTasks()
       .then(setTasks)
-      .catch(() => setError("Ошибка загрузки задач"))
+      .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
   };
 
@@ -89,11 +90,11 @@ export function TasksPage() {
       <div className="space-y-4 px-4 pt-4">
         <DemoNotice />
         {loading ? <LoadingState /> : null}
-        {error ? <ErrorState description={error} onRetry={load} /> : null}
-        {!loading && !error && tasks.length === 0 ? (
+        {errorUi ? <ErrorState errorUi={errorUi} onRetry={load} /> : null}
+        {!loading && !errorUi && tasks.length === 0 ? (
           <EmptyState title="Нет задач" />
         ) : null}
-        {!loading && !error ? (
+        {!loading && !errorUi ? (
           <>
             {renderGroup("Сегодня", grouped.today)}
             {renderGroup("Предстоящие", grouped.upcoming)}

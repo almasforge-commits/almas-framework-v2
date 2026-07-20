@@ -13,6 +13,8 @@ import {
   sanitizeInboxMetadata,
 } from "./inboxSanitizer.js";
 import { sanitizeUniversalExtraction } from "./universalExtractionSanitizer.js";
+import { sanitizePersonalKnowledgeSummary } from "../personalKnowledge/personalKnowledgeObservation.js";
+import { sanitizeReasoningSummary } from "../reasoning/reasoningObservation.js";
 import {
   insertInboxItem,
   updateInboxItemByRequestKey,
@@ -214,6 +216,98 @@ export async function recordInboxUniversalExtraction(
     return { success: true, skipped: false, reason: null, item };
   } catch (error) {
     return failureResult("inbox_extraction_record_failed", error);
+  }
+}
+
+/**
+ * Persists sanitized Personal Knowledge shadow-ingest summary into metadata.
+ * Audit only — never stores full personal facts / raw text dumps.
+ */
+export async function recordInboxPersonalKnowledgeSummary(
+  requestKey,
+  summary,
+  deps = {}
+) {
+  if (!(deps.forceEnabled === true) && !isInboxEnabled()) {
+    return disabledResult();
+  }
+
+  try {
+    if (!requestKey) return failureResult("invalid_request_key");
+
+    const sanitized = sanitizePersonalKnowledgeSummary(summary);
+    if (!sanitized?.personalKnowledge) {
+      return failureResult("invalid_personal_knowledge_summary");
+    }
+
+    const findFn = deps.findInboxItemByRequestKeyFn ?? findInboxItemByRequestKey;
+    const existing = await findFn(requestKey, deps);
+    const prevMeta =
+      existing?.metadata && typeof existing.metadata === "object"
+        ? existing.metadata
+        : {};
+
+    const updateFn = deps.updateInboxItemByRequestKeyFn ?? updateInboxItemByRequestKey;
+    const item = await updateFn(
+      requestKey,
+      {
+        metadata: {
+          ...prevMeta,
+          personalKnowledge: sanitized.personalKnowledge,
+        },
+      },
+      deps
+    );
+
+    return { success: true, skipped: false, reason: null, item };
+  } catch (error) {
+    return failureResult("inbox_personal_knowledge_record_failed", error);
+  }
+}
+
+/**
+ * Persists sanitized Reasoning shadow-observation summary into metadata.
+ * Audit only — counts / type names / reason codes; never insight text.
+ */
+export async function recordInboxReasoningSummary(
+  requestKey,
+  summary,
+  deps = {}
+) {
+  if (!(deps.forceEnabled === true) && !isInboxEnabled()) {
+    return disabledResult();
+  }
+
+  try {
+    if (!requestKey) return failureResult("invalid_request_key");
+
+    const sanitized = sanitizeReasoningSummary(summary);
+    if (!sanitized?.reasoning) {
+      return failureResult("invalid_reasoning_summary");
+    }
+
+    const findFn = deps.findInboxItemByRequestKeyFn ?? findInboxItemByRequestKey;
+    const existing = await findFn(requestKey, deps);
+    const prevMeta =
+      existing?.metadata && typeof existing.metadata === "object"
+        ? existing.metadata
+        : {};
+
+    const updateFn = deps.updateInboxItemByRequestKeyFn ?? updateInboxItemByRequestKey;
+    const item = await updateFn(
+      requestKey,
+      {
+        metadata: {
+          ...prevMeta,
+          reasoning: sanitized.reasoning,
+        },
+      },
+      deps
+    );
+
+    return { success: true, skipped: false, reason: null, item };
+  } catch (error) {
+    return failureResult("inbox_reasoning_record_failed", error);
   }
 }
 

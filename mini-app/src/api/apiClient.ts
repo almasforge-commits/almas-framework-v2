@@ -1,35 +1,11 @@
+import type { AlmasApiClient } from "./apiTypes";
 import { mockApi } from "./mockApi";
-import type {
-  FinancePeriod,
-  FinanceSummary,
-  FinanceTransaction,
-  HomePayload,
-  InboxItem,
-  KnowledgeItem,
-  Task,
-} from "./apiTypes";
+import { createRealApi } from "./realApi";
+import { getApiMode, type ApiMode } from "../config/env";
 
-/**
- * ALMAS Mini App API boundary.
- *
- * Future production client must:
- * - call ALMAS backend HTTPS endpoints (not privileged Supabase from the browser);
- * - send Telegram WebApp `initData` (raw signed string) for server-side validation;
- * - never treat `initDataUnsafe` as authenticated identity.
- *
- * Current implementation delegates to mockApi only.
- */
-export interface AlmasApiClient {
-  getDashboard(greetingName: string | null): Promise<HomePayload>;
-  getInbox(): Promise<InboxItem[]>;
-  getFinanceSummary(period: FinancePeriod): Promise<FinanceSummary>;
-  getFinanceTransactions(period: FinancePeriod): Promise<FinanceTransaction[]>;
-  getTasks(): Promise<Task[]>;
-  patchTask(id: string, patch: { completed: boolean }): Promise<Task | null>;
-  getKnowledge(): Promise<KnowledgeItem[]>;
-}
+export type { AlmasApiClient };
 
-export const apiClient: AlmasApiClient = {
+const mockClient: AlmasApiClient = {
   getDashboard: (greetingName) => mockApi.getDashboard(greetingName),
   getInbox: () => mockApi.getInbox(),
   getFinanceSummary: (period) => mockApi.getFinanceSummary(period),
@@ -39,13 +15,17 @@ export const apiClient: AlmasApiClient = {
   getKnowledge: () => mockApi.getKnowledge(),
 };
 
-/** Planned backend routes (not called yet). */
-export const FUTURE_API_ROUTES = {
+export function resolveApiClient(mode: ApiMode = getApiMode()): AlmasApiClient {
+  return mode === "live" ? createRealApi() : mockClient;
+}
+
+export const apiClient: AlmasApiClient = resolveApiClient();
+
+export const API_ROUTES = {
   dashboard: "GET /api/dashboard",
   inbox: "GET /api/inbox",
   financeSummary: "GET /api/finance/summary",
   financeTransactions: "GET /api/finance/transactions",
   tasks: "GET /api/tasks",
-  patchTask: "PATCH /api/tasks/:id",
   knowledge: "GET /api/knowledge",
 } as const;

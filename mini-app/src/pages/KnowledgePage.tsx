@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/apiClient";
 import type { KnowledgeItem } from "../api/apiTypes";
+import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
 import { DemoNotice } from "../components/DemoNotice";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
@@ -18,15 +19,15 @@ export function KnowledgePage() {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
 
   const load = () => {
     setLoading(true);
-    setError(null);
+    setErrorUi(null);
     apiClient
       .getKnowledge()
       .then(setItems)
-      .catch(() => setError("Ошибка загрузки знаний"))
+      .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
   };
 
@@ -60,9 +61,9 @@ export function KnowledgePage() {
         </label>
 
         {loading ? <LoadingState /> : null}
-        {error ? <ErrorState description={error} onRetry={load} /> : null}
+        {errorUi ? <ErrorState errorUi={errorUi} onRetry={load} /> : null}
 
-        {!loading && !error && filtered.length === 0 ? (
+        {!loading && !errorUi && filtered.length === 0 ? (
           <EmptyState title="Ничего не найдено" description="Измените запрос." />
         ) : null}
 

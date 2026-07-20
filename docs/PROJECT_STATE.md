@@ -61,12 +61,90 @@
   - Known limitation: "🌐 Открыть ALMAS" always shows "Веб-интерфейс пока не подключён." until `ALMAS_WEB_APP_URL` is set to a real `https://` URL
 
 - **Telegram Mini App Foundation v1 (`mini-app/`)**
-  - Separate Vite + React + TypeScript + Tailwind client; mock dashboard / Inbox / Finance / Tasks / Knowledge / More placeholders
+  - Separate Vite + React + TypeScript + Tailwind client; Home / Inbox / Finance / Tasks / Knowledge / More
   - Telegram WebApp bridge (`ready` / `expand` / theme / display user); browser preview without Telegram
-  - Typed `apiClient` + `mockApi` boundary only — no live API, no Supabase credentials in the client
-  - Presentation layer only; ALMAS Core remains business-logic source of truth
-  - Not deployed; `ALMAS_WEB_APP_URL` / BotFather / `.env` / live menu button not connected yet
+  - Typed `apiClient` selects `mockApi` (default) or `realApi` (`VITE_ALMAS_API_MODE=live` + `VITE_ALMAS_API_URL`)
+  - Live auth: raw `initData` only via `Authorization: tma …`; safe 401/503/network UI; no Supabase/bot secrets in client
+  - Presentation layer only; not deployed; bot `.env` / `ALMAS_WEB_APP_URL` unchanged
   - See `mini-app/README.md`
+
+- **Read-only Mini App API (`api/`)**
+  - Separate Express HTTP entry (`npm run api`); bot polling (`npm start`) unchanged; `.env` not modified
+  - Official bot-token HMAC for raw `initData`; generic 401; ALMAS `Authorization: tma …` convention
+  - Envelopes `{ data }` / `{ data, meta }`; Inbox reads ignore `INBOX_ENABLED`; fail-closed Tasks/Knowledge
+  - Application filters do not replace RLS (documented limitation)
+  - Covered by `scripts/test-api-*.js` including `test-api-boundary.js`
+  - Mini App client not wired yet (still mock); not deployed
+  - See `api/README.md`
+
+- **Conversation Context + Clarification Engine foundation (D-017)**
+  - In-memory pending drafts per `(actorKey, chatId)`: `services/context/*` (TTL, update, requestKey idempotency)
+  - Thin `routeText()` hook + `handlers/routes/clarificationRoute.js`
+  - Completes incomplete `task_create` / `memory_save` / incomplete finance (currency→description; legacy writes)
+  - Shadow: no AI/task/memory clarification UX; Active: task/memory asks; Finance clarify in any mode
+  - Covered by `scripts/test-conversation-context.js`, `scripts/test-clarification-engine.js`, `scripts/test-clarification-routing-regressions.js`
+
+- **Personal Knowledge Engine foundation (D-018)**
+  - Library only: `services/personalKnowledge/*` + `config/personalKnowledge.js`
+  - Closed personal ontology; deterministic RU/EN classifier; confidence validation; Personal vs World split
+  - Injectable bounded in-memory store; `ingest` / `retrieve` facade with provenance
+  - Covered by `scripts/test-personal-knowledge-*.js`
+
+- **Personal Knowledge Shadow Ingest from Inbox (D-019)**
+  - After Universal Extraction record: map supported candidates → PK engine (shadow, in-memory)
+  - Sanitized `metadata.personalKnowledge` summary; actorKey required; idempotent `requestKey:pk:<index>`
+  - Default disabled via `PERSONAL_KNOWLEDGE_ENABLED`; no Telegram / execution / migration / `.env` change
+  - Covered by `scripts/test-personal-knowledge-shadow-ingest.js`
+
+- **Reasoning Engine foundation (D-020)**
+  - Library: `services/reasoning/*` — Facts → Insights → Recommendations (deterministic, evidence-backed)
+  - In-memory actor-scoped store; no Telegram/Inbox/execution wiring; no migration
+  - Covered by `scripts/test-reasoning-engine.js`
+
+- **Reasoning Shadow Observation (D-021)**
+  - After PK shadow ingest: actor-scoped facts → deriveInsights / deriveRecommendations → sanitized `metadata.reasoning`
+  - Defaults off (`REASONING_ENABLED`); audit-only; idempotent via `requestKey`; no LLM / migration / Telegram UX
+  - Covered by `scripts/test-reasoning-shadow-observation.js`
+
+- **Answer Engine Architecture (D-022)**
+  - Orchestration library `services/answer/*` + `config/answerEngine.js` — plan → retrieve (fixed order) → rank → conflict → compose
+  - Reuses Context / PK / Reasoning / World adapter / injectable domain readers; zero execution; no Telegram wiring
+  - Covered by `scripts/test-answer-engine.js`
+
+- **Answer Engine Read-Only Integration (D-023)**
+  - Telegram questions (`спроси`/`найди`/`вспомни` + open info questions) → `answerRoute` → Answer Engine → reply
+  - Execution / navigation / exact commands unchanged; AI Router ownership unchanged; no domain writes
+  - Covered by `scripts/test-answer-telegram-path.js`
+
+- **Durable Personal Knowledge + Reasoning Persistence (D-024)**
+  - Repository interfaces + in-memory adapters; Supabase drivers; migration `0004` prepared (not applied)
+  - Engines unchanged architecturally — DI via `repository`/`store`; actor-scoped RLS helpers; idempotent upserts
+  - Covered by `scripts/test-durable-repositories.js`
+
+- **Universal Knowledge Ingestion (D-025)**
+  - Normalized document contract + source adapters + chunker + ingestion pipeline (shadow default)
+  - Reuses Universal/Entity/Relationship extraction; KnowledgeRepository DI; no Telegram / PK auto-write
+  - Covered by `scripts/test-universal-ingestion.js`
+
+- **World Knowledge Gateway (D-026)**
+  - Pluggable providers + gateway normalize/dedupe/rank/cache; mock providers only; defaults off
+  - Never writes Personal Knowledge
+  - Covered by `scripts/test-world-knowledge-gateway.js`
+
+- **Answer Engine World Knowledge Integration (D-027)**
+  - Optional `worldKnowledgeGateway` DI into Answer Engine; personal-only queries skip world
+  - Personal priority + provenance + conflict exposure
+  - Covered by `scripts/test-answer-world-integration.js`
+
+- **Telegram World Knowledge Wiring (D-028)**
+  - `createWorldKnowledgeForTelegram` + Answer factory DI; modes off/shadow/active (default off)
+  - Shadow audit without reply change; active uses world evidence; timeout/failure fallback
+  - Covered by `scripts/test-telegram-world-wiring.js`
+
+- **Official RSS/Atom World Provider (D-029)**
+  - Allowlisted HTTPS feeds; RSS 2.0 + Atom parser; relevance filter; SSRF / size / timeout bounds
+  - Default registry empty (no invented URLs); factory registers only when feeds enabled
+  - Covered by `scripts/test-official-feed-provider.js`
 
 ## In Progress
 
@@ -85,7 +163,14 @@
 
 ## Next
 
-- Mini App: HTTPS backend API for dashboard/Inbox/Finance/Tasks/Knowledge + server-side Telegram `initData` validation; then deploy static Mini App and set `ALMAS_WEB_APP_URL`
+- Curate and enable a small verified official HTTPS feed allowlist in `config/worldKnowledgeFeeds.js` (still default-off World Knowledge)
+- Wire Universal Ingestion to a non-Telegram entry (API upload / script) in shadow mode
+- Apply migration `0004` (Personal Knowledge + Reasoning) after review; optionally wire durable repos via DI (still default in-memory)
+- Optional: surface accepted insights/recommendations to users (explicit UX; out of shadow)
+- Optional: migrate exact finance read commands (`баланс`, …) onto Answer Engine while preserving reply format
+- Temporal Resolver (timezone / ISO due times on clarified task drafts; actor default e.g. `Asia/Bangkok`)
+- Deploy Mini App + API over HTTPS; set `VITE_ALMAS_API_MODE=live` / `VITE_ALMAS_API_URL` at build time; set bot `ALMAS_WEB_APP_URL`
+- Task/Knowledge per-user ownership so `/api/tasks` and `/api/knowledge` can return scoped rows safely
 - Inspect/apply RLS + apply the Knowledge migration (`0001`) to Supabase
 - Implement additional source-specific loaders (PDF, Website, Voice, Notes, Instagram transcripts) that populate the same `context.metadata.source` contract and reuse the shared `buildKnowledge` → `saveKnowledge` → chunk/embed pipeline
 - Unified RAG across Knowledge + Memory (replacing the two separate search systems)

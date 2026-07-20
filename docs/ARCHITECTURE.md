@@ -29,7 +29,7 @@ Storage
 - **config/** — Telegram bot client, static AI model config, `webapp.js`, `inbox.js` (Inbox flags), and `domainRegistry.js` (single source of truth for ALMAS domains).
 - **core/** — pipeline engine (`Pipeline`, `PipelineLogger`), shared context factory, constants, small text/date utilities. Only the YouTube ingestion flow currently runs through a full pipeline: validate input → load video info → load transcript → AI summary → build knowledge.
 - **providers/** — integration boundaries: OpenAI (`askAI`, embeddings), the Supabase client, JSON file drivers for legacy Knowledge storage (being replaced, see "Migration in progress" below), and `knowledgeChunkDriver.js` (Supabase I/O for `knowledge_chunks` — insert, delete-by-knowledge-id, load-by-knowledge-id, and the `match_knowledge_chunks` similarity-search RPC; not yet wired into any flow, see `PROJECT_STATE.md`).
-- **services/** — … `inbox/` (Unified Inbox observation + Universal Extractor shadow candidates + hybrid AI router; legacy `inboxClassifier.js` unused), …
+- **services/** — … `inbox/` (Unified Inbox observation + Universal Extractor shadow candidates + hybrid AI router; legacy `inboxClassifier.js` unused), `context/` (Conversation Context store + Clarification Engine; in-memory pending drafts), `personalKnowledge/` (Personal Knowledge Engine foundation + shadow ingest), `reasoning/` (Reasoning Engine foundation; unwired), …
 - **handlers/** — Telegram-facing routing. Currently one large message handler plus extracted route files (`financeRoute.js` for finance reads, `youtubeRoute.js` for YouTube ingestion, `voiceRoute.js` for voice transcription, `menuRoute.js` for the navigation menu — see "Navigation Menu" below) and `keyboards/mainMenu.js` (pure Telegram keyboard builders). Most domains (memory, knowledge, tasks, finance writes) are still routed inline in the main handler rather than in dedicated route files.
 
 ### Current Data Stores
@@ -71,6 +71,66 @@ Shared steps (`buildKnowledge`, `saveKnowledge`, chunking, embedding) read only 
 
 Telegram voice messages (`handlers/routes/voiceRoute.js`) are transcribed via OpenAI (`services/ai/transcriptionService.js`, requesting Russian explicitly via the `language` parameter) and then routed through the exact same `routeText()` function typed text uses (`handlers/messageHandler.js`) — voice is not a separate code path for Finance/Memory/Tasks/Knowledge/Chat, only an additional input adapter in front of the same router.
 
+### Personal Knowledge Engine (foundation)
+
+Standalone library under `services/personalKnowledge/` (D-018). Classifies user-grounded text into a closed personal ontology, validates confidence, stores only verified personal facts in an injectable in-memory store, and exposes `retrieve()` over personal + optional read-only world adapters with provenance.
+
+- Injectable bounded in-memory store (also exposed as `repositories/inMemoryPersonalKnowledgeRepository`); **durable path (D-024):** `SupabasePersonalKnowledgeRepository` behind the same repository interface. Engines take `deps.repository` / `deps.store` only — no Supabase imports in engine code.
+- **Shadow ingest (D-019):** when Inbox observation records Universal Extraction, `personalKnowledgeObservation.js` may feed supported candidates into the engine (shadow only). Sanitized counts land in Inbox `metadata.personalKnowledge`. Default `PERSONAL_KNOWLEDGE_ENABLED=false` → no-op. Does not change Telegram replies or domain execution.
+- World/general knowledge is rejected on personal ingest; world search never writes into the personal store.
+- Domain Registry kinds may map into PK domains; this module is not a second global domain registry.
+- Timeline is retrieval-oriented only — never stored as a write domain in v1.
+
+### Reasoning Engine (foundation)
+
+Standalone library under `services/reasoning/` (D-020). Derives evidence-backed **insights** and **recommendations** from personal facts already held by ALMAS.
+
+- Deterministic rules only (no LLM). Never invents facts; world knowledge is never used as evidence.
+- Insights require ≥2 supporting facts, confidence scoring, and validation; recommendations reference insights only.
+- Injectable in-memory store (also `repositories/inMemoryReasoningRepository`); **durable path (D-024):** `SupabaseReasoningRepository` via DI (`deps.repository` / `deps.store`). Core engine stays independent of Inbox/Telegram/Supabase.
+- **Shadow observation (D-021):** after PK shadow ingest, `reasoningObservation.js` loads actor-scoped personal facts, derives insights/recommendations in memory, and writes sanitized counts to Inbox `metadata.reasoning`. Enabled only when Inbox is active, PK is enabled, and `REASONING_ENABLED` + mode `shadow` (defaults off). No Telegram UX; no recommendation delivery; no migration.
+
+### Answer Engine (orchestration architecture)
+
+Library under `services/answer/` (D-022). Single orchestrator that **decides which existing services participate** in producing an evidence-based answer — it does not replace Clarification, Personal Knowledge, Reasoning, World adapter, or domain readers.
+
+- Fixed retrieval order: Conversation Context → Personal Knowledge → Reasoning → World Knowledge → Domain readers (Finance / Tasks / Knowledge / Memory) → merge.
+- Deterministic evidence ranking + conflict resolution (personal > domain > reasoning > world); never silently merges contradictions; world never overwrites personal; world hits keep provenance.
+- Output contract: `answer`, `confidence`, `needsClarification`, `clarificationQuestion`, `sources`, `evidenceSummary`, optional `worldSources` / `conflicts`, flags, `execution: { type: "none" }`.
+- Injectable deps only; no LLM / new AI pipeline; core library stays free of handler/execution writes.
+- **World Knowledge integration (D-027):** optional `deps.worldKnowledgeGateway`; deterministic `decideWorldRetrieval` skips personal-only queries; personal always wins; world read-only with full provenance; conflicts expose both sides (`resolutionPolicy: personal_priority`).
+- **Telegram World wiring (D-028):** `createWorldKnowledgeForTelegram` + `createTelegramAnswerEngineWithWorld` behind `WORLD_KNOWLEDGE_ENABLED` + `WORLD_KNOWLEDGE_MODE` (`off` / `shadow` / `active`, default off). Shadow audits without changing replies; active may use world evidence; failures/timeouts fall back safely. Mock providers not enabled unless explicitly allowed for tests.
+- **Official feeds (D-029):** first real provider — allowlisted RSS/Atom only; default registry empty until curated; SSRF-hardened fetch.
+- **Read-only Telegram path (D-023):** `handlers/routes/answerRoute.js` answers genuine information questions (`спроси` / `найди` / `вспомни` / open interrogatives) via Answer Engine. Execution, navigation, and exact commands keep existing handlers. AI Router ownership unchanged.
+
+### Universal Knowledge Ingestion (D-025)
+
+Library under `services/ingestion/` + `sourceAdapters/`. Every external source converts to one **Normalized Document**, then chunk → Universal Extraction → Entity → Relationship → optional Inbox observe → `KnowledgeRepository` (shadow by default).
+
+- Adapters: YouTube (reuses existing info loader), PDF/DOCX (pre-extracted text; no new parsers), HTML, Web, Text, Markdown. Future stubs: Image OCR, Email, Calendar, WHOOP, Drive, Dropbox.
+- Modes: `dry_run` / `shadow` (default) / `active`. No Telegram wiring; no Personal Knowledge auto-write; does not replace the existing YouTube route workflow.
+- Chunker wraps `core/utils/chunkText` with stable ids + checksums; embeddings left null for a later milestone.
+
+### World Knowledge Gateway (D-026 / D-027 / D-029)
+
+Standalone library under `services/worldKnowledge/`. Single entry for external knowledge **providers** (pluggable). Never stores world facts as personal knowledge.
+
+- Provider contract: `initialize` / `search` / `health` / `shutdown`; normalized results with provenance (provider, url, sourceType, confidence, language, publishedAt, retrievedAt).
+- Gateway: register/unregister providers → search all → normalize → dedupe → score/rank → optional in-memory TTL cache. Defaults disabled (`WORLD_KNOWLEDGE_ENABLED` unset).
+- **Official RSS/Atom provider (D-029):** allowlisted HTTPS feeds only (`config/worldKnowledgeFeeds.js`; default empty). No article scraping, no web search, no LLM. Registered by `createWorldKnowledgeForTelegram` when mode is shadow/active and ≥1 feed enabled.
+- **Answer Engine (D-027 / D-028):** inject via `deps.worldKnowledgeGateway`; called only when `decideWorldRetrieval` says so; Telegram composition uses `createWorldKnowledgeForTelegram` (default-off). Falls back to legacy `searchWorld` / adapter when gateway absent. Distinct from the thin Personal Knowledge `worldKnowledgeAdapter` DI hook.
+
+### Conversation Context + Clarification Engine
+
+Thin multi-turn layer (`services/context/*`, `handlers/routes/clarificationRoute.js`) hooked in `routeText()` after the menu / meaningless-input fast paths and before AI-router / legacy domain writes:
+
+- One pending clarification per `(actorKey, chatId)` in an injectable bounded in-memory store (TTL 15m; get/set/update/clear/expire; `requestKey` idempotency). No DB migration.
+- Supported drafts only: incomplete `task_create`, `memory_save`, and incomplete finance (parsed amount but missing explicit currency and/or description).
+- Field-based Russian questions (no LLM); finance asks currency then description, one field at a time.
+- Cancel → `Операция отменена.`; expiry clears silently and continues normal routing; menu labels / meaningless short input / destructive phrases never satisfy a pending field.
+- **Ask policy (D-017):** shadow → no user-visible AI/task/memory clarification; active → task/memory clarification allowed; incomplete finance clarification works in any `AI_ROUTER_MODE` (legacy finance ownership; AI executor never writes finance).
+- Temporal follow-ups store `unresolvedTemporal` only (no ISO invent). Voice transcripts share the same path as text.
+
 ### Navigation Menu
 
 A button-based main menu replaces the old plain-text "Пока я умею" fallback as the primary discovery UI, without changing any existing typed command, voice behavior, or Finance/Memory/Knowledge/Task business logic:
@@ -78,8 +138,8 @@ A button-based main menu replaces the old plain-text "Пока я умею" fall
 - **`handlers/keyboards/mainMenu.js`** — pure functions building the persistent `ReplyKeyboardMarkup` main menu (📚 Знания / 💡 Идеи / 📋 Задачи / 🚀 Проекты / 💰 Финансы / 🧠 Память / 🌐 Открыть ALMAS / ❓ Помощь) and the `InlineKeyboardMarkup`s used by each section. No Telegram/bot import — trivially unit-testable.
 - **`handlers/routes/menuRoute.js`** — one `send*()` function per menu destination. Each reuses an existing, unmodified read function (`getAllKnowledge`, `getActiveTasks`/`getCompletedTasks`, `getBalance`/`getHistory`/`getStatistics`) to format its reply; no new storage or business logic.
 - **`handlers/callbackHandler.js`** — `registerCallbackHandler()` (called once from `index.js`, alongside `registerMessageHandler()`) listens for `callback_query` events from inline buttons and dispatches on a fixed `callback_data` map (`menu:home`, `menu:knowledge:all`, `menu:knowledge:search`, `menu:tasks:done`, `menu:finance:history`, `menu:finance:stats`, `menu:memory:recall`, `menu:memory:search`). Always calls `answerCallbackQuery`, even on a handler failure (in which case it also sends a short generic error reply instead of leaving the user without a response).
-- `routeText()` (`handlers/messageHandler.js`) intercepts the exact main-menu button labels (plus `/start` and `"меню"`) in a small dispatch table, checked first — before any Finance/Memory/Task/Knowledge command — but after the (untouched) AI-router shadow hook. Unrecognized input now shows the main menu ("Не понял запрос. Выбери раздел в меню 👇") instead of the old long command list, which moved verbatim into `sendHelp()` (reachable via "❓ Помощь").
-- **Stateless by design**: buttons that would otherwise need free-text input (Knowledge/Memory search, Memory recall) do not introduce session state — they reply with the existing typed command to use (e.g. "Напиши: найди `<запрос>`"), keeping the whole navigation layer additive and isolated from the AI router's execution-ownership work.
+- `routeText()` (`handlers/messageHandler.js`) intercepts the exact main-menu button labels (plus `/start` and `"меню"`) in a small dispatch table, checked first — before clarification, AI router, and Finance/Memory/Task/Knowledge commands. Unrecognized input now shows the main menu ("Не понял запрос. Выбери раздел в меню 👇") instead of the old long command list, which moved verbatim into `sendHelp()` (reachable via "❓ Помощь").
+- **Stateless by design (menu only)**: buttons that would otherwise need free-text input (Knowledge/Memory search, Memory recall) do not introduce menu session state — they reply with the existing typed command to use (e.g. "Напиши: найди `<запрос>`"). Pending clarification state (D-017) is separate and never keyed off menu labels.
 - **`config/webapp.js`** — `ALMAS_WEB_APP_URL` (must be `https://`, else ignored). When set, "🌐 Открыть ALMAS" becomes a real `web_app` button (opens client-side, no message sent to the bot); when unset (the current, untouched `.env`), it stays a plain button whose label `routeText()` intercepts to reply "Веб-интерфейс пока не подключён."
 
 ### Telegram Mini App (presentation layer)
@@ -88,10 +148,21 @@ A button-based main menu replaces the old plain-text "Пока я умею" fall
 
 - Navigates Home / Inbox / Finance / Tasks / More (+ Knowledge and placeholders).
 - Uses `window.Telegram.WebApp` when available; works in browser preview without Telegram.
-- Consumes a typed `apiClient` boundary; v1 uses `mockApi` only (no live ALMAS data, no Supabase from the client).
-- Must call a future ALMAS backend HTTPS API — **direct privileged Supabase access from the Mini App is forbidden**.
+- Consumes a typed `apiClient` boundary; default `VITE_ALMAS_API_MODE=mock` uses `mockApi`; `live` uses `realApi` against the read-only HTTP API with `Authorization: tma <raw initData>` only.
+- Must call the ALMAS backend HTTPS API — **direct privileged Supabase access from the Mini App is forbidden**.
 - `initDataUnsafe` is UI personalization only; authenticated identity must be validated server-side from raw `initData`.
-- Deployment and live `ALMAS_WEB_APP_URL` wiring are **not** completed in this milestone; bot menu behavior is unchanged until a real HTTPS URL is set.
+- Deployment and live `ALMAS_WEB_APP_URL` wiring are **not** completed; bot menu behavior is unchanged until a real HTTPS URL is set.
+
+### Read-only Mini App API (`api/`)
+
+Separate Express **HTTP** process (`npm run api` → `api/server.js`). Does **not** alter bot polling (`npm start` / `index.js`). TLS is expected at the deployment proxy.
+
+- Auth (ALMAS convention, not an official Telegram HTTP requirement): `Authorization: tma <raw initData>`; official bot-token HMAC in `api/auth/validateInitData.js`; actor from signed `user.id` only. Generic `401 unauthorized` for all auth failures.
+- Stable envelopes: `{ data }` / `{ data, meta }` / `{ error: { code, message } }`.
+- GET only: `/api/health`, `/api/dashboard`, `/api/inbox`, `/api/finance/summary`, `/api/finance/transactions`, `/api/tasks`, `/api/knowledge`.
+- Fail-closed actor scoping: Finance by `user_id`, Inbox by `actor_key` (independent of `INBOX_ENABLED`); Tasks/Knowledge return `[]` when ownership cannot be enforced. Dashboard uses only scoped readers.
+- Application filters do **not** replace Supabase RLS; per-user RLS/ownership remains a future migration.
+- DI via `createApp(deps)` / reader factories; covered by `scripts/test-api-*.js`. See `api/README.md`.
 
 Before routing, a voice transcript must survive:
 
@@ -158,7 +229,7 @@ A hybrid pipeline that lets typed and voice messages be understood semantically 
 
 If `decideRouting()` / the provider fails, ownership stays empty and every legacy branch runs unchanged. `executed: false` never blocks legacy Memory.
 
-**Shadow-by-default (current state):** with `AI_ROUTER_MODE=shadow` in `.env` (unchanged), `routeText()` still uses fire-and-forget `observeMessage()` — not awaited, never executes, never sends AI confirmations. Active-mode ownership/confirmations are implemented and tested but not enabled live.
+**Shadow-by-default (current state):** with `AI_ROUTER_MODE=shadow` in `.env` (unchanged), `routeText()` still uses fire-and-forget `observeMessage()` — not awaited, never executes, never sends AI confirmations or clarification questions. Active-mode ownership/confirmations and Clarification Engine asks are implemented and tested but not enabled live.
 
 **Cost controls** (env-driven, `config/aiRouter.js`): `AI_ROUTER_ENABLED` (kill switch), `AI_ROUTER_MODE` (`off | shadow | active`, default `shadow`), `AI_ROUTER_CHEAP_MODEL` / `AI_ROUTER_MEDIUM_MODEL`, `AI_ROUTER_CHEAP_CONFIDENCE_THRESHOLD`, `AI_ROUTER_MAX_INPUT_CHARS`, `AI_ROUTER_MAX_ACTIONS`. Tier 0 always runs first; Tier 2 only runs on escalation; a Tier 1 provider failure falls back to a safe "needs clarification" decision rather than calling Tier 2.
 

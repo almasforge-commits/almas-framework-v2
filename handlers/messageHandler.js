@@ -30,17 +30,10 @@ import {
   deleteAllKnowledge,
 } from "../services/storage/knowledgeService.js";
 
-import { searchKnowledge } from "../services/search/knowledgeSearchService.js";
-import { askKnowledge } from "../services/chat/chatService.js";
-import { askKnowledgeChunks } from "../services/chat/knowledgeChunkChatService.js";
-
 import { handleYouTube } from "./routes/youtubeRoute.js";
 import { handleVoiceMessage } from "./routes/voiceRoute.js";
 
-import {
-  saveMemory,
-  searchMemories,
-} from "../services/storage/memoryService.js";
+import { saveMemory } from "../services/storage/memoryService.js";
 
 import { classifyMemory } from "../services/storage/memoryClassifier.js";
 import { shouldSaveMemory } from "../services/storage/memoryFilter.js";
@@ -65,6 +58,12 @@ import {
   startInboxReceivedObservation,
 } from "../services/inbox/inboxObservation.js";
 import { sendAiExecutionConfirmations } from "./routes/aiExecutionRoute.js";
+import {
+  handleClarificationTurn,
+  maybeStartClarificationFromAiDecision,
+  maybeStartClarificationFromFinanceAttempt,
+} from "./routes/clarificationRoute.js";
+import { maybeHandleAnswerQuestion } from "./routes/answerRoute.js";
 
 import {
   sendMainMenu,
@@ -174,6 +173,22 @@ export async function routeText(chatId, text, from, options = {}) {
     originalText: text,
   };
 
+  // Conversation Context + Clarification Engine (thin hook, D-017).
+  // After menu / meaningless-input; before AI + legacy domain writes.
+  // Pending answers + cancel + incomplete task/memory (active only).
+  // Finance incomplete starts later (legacy-owned; any AI_ROUTER_MODE).
+  const clarificationTurn = await handleClarificationTurn({
+    chatId,
+    text,
+    from,
+    actor,
+    requestKey,
+    inputSource,
+  });
+  if (clarificationTurn.handled) {
+    return;
+  }
+
   // AI Intent Analyzer / Action Planner — execution-ownership boundary.
   // Runs only after the menu fast path above, so navigation labels never
   // pay for (or wait on) an AI call.
@@ -199,11 +214,28 @@ export async function routeText(chatId, text, from, options = {}) {
   // so every legacy branch below runs exactly as if the AI router didn't
   // exist. See services/inbox/routingDecisionService.js.
   let aiOwnership = { executedActions: [] };
+  let aiDecision = null;
 
   if (isAiRouterExecutionActive()) {
     try {
-      const decision = await decideRouting(text, routingContext);
-      aiOwnership = getExecutedOwnedActions(decision);
+      aiDecision = await decideRouting(text, routingContext);
+      aiOwnership = getExecutedOwnedActions(aiDecision);
+
+      if (
+        aiDecision?.needsClarification &&
+        aiOwnership.executedActions.length === 0
+      ) {
+        const started = await maybeStartClarificationFromAiDecision({
+          chatId,
+          text,
+          actor,
+          decision: aiDecision,
+          requestKey,
+        });
+        if (started.handled) {
+          return;
+        }
+      }
     } catch (error) {
       console.error(
         "[ai-router] active-mode decision failed, falling back to legacy routing:",
@@ -273,6 +305,23 @@ export async function routeText(chatId, text, from, options = {}) {
   console.log("COUNT:", finances.length);
   console.log("TEXT:", text);
   console.log("FINANCE:", finance);
+
+  // Incomplete single finance (amount ok, currency/description missing):
+  // clarify before any legacy write. Works in any AI_ROUTER_MODE.
+  // Multi-item batches keep the existing write path unchanged.
+  if (finance && finances.length <= 1) {
+    const financeClarify = await maybeStartClarificationFromFinanceAttempt({
+      chatId,
+      text,
+      actor,
+      requestKey,
+      parsed: finance,
+    });
+    if (financeClarify.handled) {
+      return;
+    }
+  }
+
   if (finances.length > 1) {
 
     console.log(">>> MULTI MODE");
@@ -370,6 +419,8 @@ export async function routeText(chatId, text, from, options = {}) {
   // scope for now: finance input must use digits, e.g. "расход 40000
   // кофе". This falls through to the "not recognized" fallback below
   // instead of being saved.
+  // Finance-like text that failed to parse entirely — still must not
+  // become Memory (unchanged). Clarification requires a parsed amount.
   const isUnparsedFinanceAttempt =
     !finance && finances.length === 0 && looksLikeFinanceAttempt(text);
 
@@ -390,91 +441,14 @@ export async function routeText(chatId, text, from, options = {}) {
 
     return;
   }
-  // AI Chat
-if (text.toLowerCase().startsWith("спроси ")) {
-
-  const question = text.slice(8).trim();
-
-  if (!question) {
-    await bot.sendMessage(chatId, "❌ Напиши вопрос.");
-    return;
-  }
-
-  await bot.sendMessage(chatId, "🧠 Думаю...");
-
-  let chunkAnswer = null;
-
-  try {
-    chunkAnswer = await askKnowledgeChunks(question);
-  } catch (error) {
-    console.error("Ошибка chunk-based RAG:", error);
-  }
-
-  if (chunkAnswer) {
-
-    const chunkSources = (chunkAnswer.sources ?? [])
-      .map(source => `• ${source}`)
-      .join("\n");
-
-    await bot.sendMessage(
-      chatId,
-`🧠 Ответ
-
-${chunkAnswer.answer}
-
-━━━━━━━━━━━━━━
-
-📚 Источники
-
-${chunkSources || "Нет"}`
+  // Read-only Answer Engine — "спроси …" (replaces legacy RAG chat path).
+  if (text.toLowerCase().startsWith("спроси ")) {
+    const answered = await maybeHandleAnswerQuestion(
+      { chatId, text, from, actor },
+      {}
     );
-
-    return;
+    if (answered.handled) return;
   }
-
-  // Chunk-based RAG found nothing usable — fall back to the existing
-  // whole-document path below, unchanged, without sending "🧠 Думаю..."
-  // again.
-
-  const knowledge = await searchKnowledge(question);
-
-  if (knowledge.length === 0) {
-    await bot.sendMessage(
-      chatId,
-      "📚 В моей базе знаний пока нет подходящей информации."
-    );
-    return;
-  }
-
-  const answer = await askKnowledge(question, knowledge);
-
-  if (!answer) {
-    await bot.sendMessage(
-      chatId,
-      "❌ Не удалось получить ответ."
-    );
-    return;
-  }
-
-  const sources = (answer.sources ?? [])
-    .map(source => `• ${source}`)
-    .join("\n");
-
-  await bot.sendMessage(
-    chatId,
-`🧠 Ответ
-
-${answer.answer}
-
-━━━━━━━━━━━━━━
-
-📚 Источники
-
-${sources || "Нет"}`
-  );
-
-  return;
-}
 
 // Мои знания
 if (text.toLowerCase() === "мои знания") {
@@ -569,87 +543,17 @@ ${tasks}`
   return;
 }
 
-// Универсальный поиск
+// Read-only Answer Engine — "найди"/"найти"/"вспомни" (search / recall).
 if (
   text.toLowerCase().startsWith("найди ") ||
-  text.toLowerCase().startsWith("найти ")
+  text.toLowerCase().startsWith("найти ") ||
+  text.toLowerCase().startsWith("вспомни ")
 ) {
-  const query = text.split(" ").slice(1).join(" ").trim();
-
-  if (!query) {
-    await bot.sendMessage(chatId, "❌ Что нужно найти?");
-    return;
-  }
-
-  await bot.sendMessage(chatId, `🔎 Ищу "${query}"...`);
-
-  const memories = await searchMemories(query);
-  const knowledge = await searchKnowledge(query);
-
-  let message = "";
-
-  if (memories.length > 0) {
-    message += "🧠 Память\n\n";
-
-    memories.forEach((memory, index) => {
-      const similarity =
-        memory.similarity != null
-          ? ` (${Math.round(memory.similarity * 100)}%)`
-          : "";
-
-      message += `${index + 1}. ${memory.content}${similarity}\n`;
-    });
-
-    message += "\n━━━━━━━━━━━━━━\n\n";
-  }
-
-  if (knowledge.length > 0) {
-    message += "📚 База знаний\n\n";
-
-    knowledge.forEach((item) => {
-      message += `📚 ${item.title}\n`;
-      message += `👤 ${item.source.author}\n`;
-      message += `${item.summary}\n\n`;
-    });
-  }
-
-  if (!message) {
-    message = "❌ Ничего не найдено.";
-  }
-
-  await bot.sendMessage(chatId, message);
-
-  return;
-}
-// Память
-if (text.toLowerCase().startsWith("вспомни ")) {
-
-  const query = text.slice(8).trim();
-
-  if (!query) {
-    await bot.sendMessage(chatId, "❌ Что нужно вспомнить?");
-    return;
-  }
-
-  const memories = await searchMemories(query);
-
-  if (memories.length === 0) {
-    await bot.sendMessage(
-      chatId,
-      `🧠 Ничего не найдено по запросу "${query}".`
-    );
-    return;
-  }
-
-  let message = `🧠 Нашёл ${memories.length} записей\n\n`;
-
-  for (const memory of memories) {
-    message += `• ${memory.content}\n`;
-  }
-
-  await bot.sendMessage(chatId, message);
-
-  return;
+  const answered = await maybeHandleAnswerQuestion(
+    { chatId, text, from, actor },
+    {}
+  );
+  if (answered.handled) return;
 }
 
 // Мои задачи
@@ -923,6 +827,16 @@ if (
 if (isYouTubeLink(text)) {
   await handleYouTube(chatId, text);
   return;
+}
+
+// Read-only Answer Engine — open information questions that fell through
+// exact commands / execution. Must run before memory-save fallthrough.
+{
+  const answered = await maybeHandleAnswerQuestion(
+    { chatId, text, from, actor },
+    {}
+  );
+  if (answered.handled) return;
 }
 
 // Память — сохраняется только если ничего выше не сработало, то есть

@@ -5,9 +5,13 @@ import {
   recordInboxExecution,
   recordInboxFailure,
   recordInboxUniversalExtraction,
+  recordInboxPersonalKnowledgeSummary,
+  recordInboxReasoningSummary,
 } from "./inboxService.js";
 import { extractUniversalInformation } from "./universalExtractor.js";
 import { AI_ROUTER_MAX_ACTIONS } from "../../config/aiRouter.js";
+import { runPersonalKnowledgeShadowIngest } from "../personalKnowledge/personalKnowledgeObservation.js";
+import { runReasoningShadowObservation } from "../reasoning/reasoningObservation.js";
 
 // Runtime-facing Inbox observer. Best-effort, never throws to callers.
 // Per-requestKey promise chain preserves received → analysis → execution
@@ -252,6 +256,100 @@ export function queueInboxDecisionObservation(requestKey, decision, context = {}
       const result = await recordFn(key, extraction, deps);
       if (result && result.success === false && result.skipped !== true) {
         logPersistFailureOnce(key, result.errorCode || result.reason);
+      }
+
+      // Personal Knowledge shadow ingest — uses extraction already produced
+      // above. Never re-extracts, never changes Telegram / domain execution.
+      try {
+        const pkIngestFn =
+          deps.runPersonalKnowledgeShadowIngestFn ??
+          runPersonalKnowledgeShadowIngest;
+        const pkResult = await pkIngestFn(
+          {
+            requestKey: key,
+            extraction,
+            actor: context.actor ?? null,
+            sourceType: context.sourceType ?? null,
+            originalText: context.originalText ?? null,
+          },
+          deps.personalKnowledgeDeps ?? deps
+        );
+
+        if (pkResult && pkResult.skipped !== true && pkResult.summary) {
+          const recordPkFn =
+            deps.recordInboxPersonalKnowledgeSummaryFn ??
+            recordInboxPersonalKnowledgeSummary;
+          const pkRecord = await recordPkFn(key, pkResult.summary, deps);
+          if (
+            pkRecord &&
+            pkRecord.success === false &&
+            pkRecord.skipped !== true
+          ) {
+            logPersistFailureOnce(
+              key,
+              pkRecord.errorCode || pkRecord.reason || "inbox_pk_summary_failed"
+            );
+          }
+        }
+
+        // Reasoning shadow observation — after PK ingest; uses accepted
+        // personal facts only. Audit summary only; never changes Telegram.
+        try {
+          const reasoningFn =
+            deps.runReasoningShadowObservationFn ??
+            runReasoningShadowObservation;
+          const reasoningDeps = {
+            ...(deps.reasoningDeps ?? deps),
+            personalKnowledgeDeps: deps.personalKnowledgeDeps,
+            personalKnowledgeEngine:
+              deps.personalKnowledgeDeps?.personalKnowledgeEngine ??
+              deps.personalKnowledgeEngine,
+            forcePersonalKnowledgeEnabled:
+              deps.personalKnowledgeDeps?.forcePersonalKnowledgeEnabled ??
+              deps.forcePersonalKnowledgeEnabled,
+          };
+          const reasoningResult = await reasoningFn(
+            {
+              requestKey: key,
+              actor: context.actor ?? null,
+              personalKnowledgeSummary: pkResult?.summary ?? null,
+              acceptedCount:
+                pkResult?.summary?.personalKnowledge?.accepted ?? 0,
+            },
+            reasoningDeps
+          );
+
+          if (
+            reasoningResult &&
+            reasoningResult.summary &&
+            reasoningResult.skipped !== true
+          ) {
+            const recordReasoningFn =
+              deps.recordInboxReasoningSummaryFn ??
+              recordInboxReasoningSummary;
+            const reasoningRecord = await recordReasoningFn(
+              key,
+              reasoningResult.summary,
+              deps
+            );
+            if (
+              reasoningRecord &&
+              reasoningRecord.success === false &&
+              reasoningRecord.skipped !== true
+            ) {
+              logPersistFailureOnce(
+                key,
+                reasoningRecord.errorCode ||
+                  reasoningRecord.reason ||
+                  "inbox_reasoning_summary_failed"
+              );
+            }
+          }
+        } catch {
+          logPersistFailureOnce(key, "inbox_reasoning_observation_failed");
+        }
+      } catch {
+        logPersistFailureOnce(key, "inbox_personal_knowledge_ingest_failed");
       }
     } catch (error) {
       logPersistFailureOnce(key, error?.code || "inbox_extraction_failed");

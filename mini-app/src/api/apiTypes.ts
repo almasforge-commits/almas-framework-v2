@@ -60,16 +60,16 @@ export interface InboxItem {
   executionSummary: string;
 }
 
+export type FinancePeriod = "today" | "week" | "month";
+
 export interface FinanceSummary {
   balance: number;
   incomeMonth: number;
   expensesMonth: number;
   currency: string;
   period: FinancePeriod;
-  demo: true;
+  demo: boolean;
 }
-
-export type FinancePeriod = "today" | "week" | "month";
 
 export interface FinanceTransaction {
   id: string;
@@ -104,6 +104,16 @@ export interface HomePayload {
   recentTasks: Task[];
   recentKnowledge: KnowledgeItem[];
   recentActions: ActivityItem[];
+}
+
+export interface AlmasApiClient {
+  getDashboard(greetingName: string | null): Promise<HomePayload>;
+  getInbox(): Promise<InboxItem[]>;
+  getFinanceSummary(period: FinancePeriod): Promise<FinanceSummary>;
+  getFinanceTransactions(period: FinancePeriod): Promise<FinanceTransaction[]>;
+  getTasks(): Promise<Task[]>;
+  patchTask(id: string, patch: { completed: boolean }): Promise<Task | null>;
+  getKnowledge(): Promise<KnowledgeItem[]>;
 }
 
 export type { TelegramUser };

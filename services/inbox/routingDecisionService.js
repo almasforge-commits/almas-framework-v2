@@ -125,6 +125,7 @@ export async function decideRouting(rawText, context = {}) {
     sourceType = null,
     normalizedText = null,
     originalText = null,
+    actor = null,
     provider,
     configOverrides = {},
     executeActionsFn = executeActions,
@@ -137,6 +138,7 @@ export async function decideRouting(rawText, context = {}) {
     normalizedText: normalizedText ?? "",
     originalText: originalText ?? rawText ?? "",
     inputSource,
+    actor,
   };
 
   try {

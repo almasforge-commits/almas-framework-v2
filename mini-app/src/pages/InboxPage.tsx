@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/apiClient";
 import type { InboxItem, InformationKind } from "../api/apiTypes";
+import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
 import { DemoNotice } from "../components/DemoNotice";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
@@ -41,15 +42,15 @@ export function InboxPage() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
   const [selected, setSelected] = useState<InboxItem | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
 
   const load = () => {
     setLoading(true);
-    setError(null);
+    setErrorUi(null);
     apiClient
       .getInbox()
       .then(setItems)
-      .catch(() => setError("Ошибка загрузки Inbox"))
+      .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
   };
 
@@ -91,9 +92,9 @@ export function InboxPage() {
         </div>
 
         {loading ? <LoadingState /> : null}
-        {error ? <ErrorState description={error} onRetry={load} /> : null}
+        {errorUi ? <ErrorState errorUi={errorUi} onRetry={load} /> : null}
 
-        {!loading && !error && filtered.length === 0 ? (
+        {!loading && !errorUi && filtered.length === 0 ? (
           <EmptyState title="Нет записей" description="Попробуйте другой фильтр." />
         ) : null}
 
