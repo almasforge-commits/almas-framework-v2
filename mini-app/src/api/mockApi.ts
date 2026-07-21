@@ -5,6 +5,7 @@ import type {
   FinanceSummary,
   FinanceTransaction,
   HomePayload,
+  IdeaItem,
   InboxItem,
   KnowledgeItem,
   MemoryItem,
@@ -384,6 +385,40 @@ export const mockApi = {
         type: "preference",
       },
     ];
+  },
+
+  async getIdeas(_opts?: {
+    category?: string | null;
+    q?: string | null;
+  }): Promise<IdeaItem[]> {
+    await delay(120);
+    return [
+      {
+        id: "i1",
+        title: "Кофейня во Вьетнаме",
+        text: "Открыть небольшую кофейню во Вьетнаме",
+        content: "Открыть небольшую кофейню во Вьетнаме",
+        category: "business",
+        tags: ["vietnam", "coffee"],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  },
+
+  async getIdea(ideaId: string): Promise<IdeaItem> {
+    await delay(80);
+    const items = await this.getIdeas();
+    return (
+      items.find((i) => i.id === ideaId) || {
+        id: ideaId,
+        title: "Идея",
+        text: "Демо-идея",
+        content: "Демо-идея",
+        category: "other",
+        tags: [],
+        createdAt: new Date().toISOString(),
+      }
+    );
   },
 
   async getCaptureSession(sessionId: string): Promise<CaptureSessionDetail> {

@@ -1,0 +1,10 @@
+# Railway / Render: run only the Mini App API (not Telegram bot polling).
+# Root Directory must be this package (Code/telegram-bot).
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "node api/server.js"
+healthcheckPath = "/health"
+restartPolicyType = "ON_FAILURE"

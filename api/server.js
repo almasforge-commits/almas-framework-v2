@@ -19,12 +19,32 @@ import { parseCorsAllowlist } from "./cors.js";
 import { listIdeasForActor, searchIdeas, getIdeaById } from "../services/ideas/ideaService.js";
 import { defaultCaptureSessionStore } from "../services/capture/captureSessionStore.js";
 import { listMemoriesForActor } from "../services/storage/listMemoriesForActor.js";
+import { listTasksForActor } from "../services/storage/listTasksForActor.js";
 
 /**
- * Production wiring for the read-only Mini App API.
+ * Resolve listen host/port for local vs hosted runtimes.
+ * Hosted (Railway/Render/etc.): PORT is set → bind 0.0.0.0.
+ * Local: keep 127.0.0.1 unless ALMAS_API_HOST overrides.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ */
+export function resolveListenConfig(env = process.env) {
+  const hosted = Boolean(
+    env.PORT ||
+      env.RAILWAY_ENVIRONMENT ||
+      env.RENDER ||
+      env.FLY_APP_NAME
+  );
+  const port = Number(env.PORT || env.ALMAS_API_PORT) || 8787;
+  const host =
+    env.ALMAS_API_HOST || (hosted ? "0.0.0.0" : "127.0.0.1");
+  return { host, port, hosted };
+}
+
+/**
+ * Production wiring for the Mini App API.
  * Does not start Telegram bot polling — run separately via `npm start`.
  *
- * Only read helpers are invoked (getBalance/getHistory/listInboxItems).
  * Application-level actor filters do not replace database RLS.
  */
 export function buildDefaultApp(env = process.env) {
@@ -40,13 +60,26 @@ export function buildDefaultApp(env = process.env) {
     getStatisticsFn: getStatistics,
   });
 
-  // Reader ignores INBOX_ENABLED — reads scoped rows when the table is available.
   const inboxReader = createInboxReader({
     listInboxItemsFn: listInboxItems,
   });
 
-  // Fail closed: no ownership-scoped query available for tasks/knowledge yet.
-  const tasksReader = createTasksReader({});
+  const tasksReader = createTasksReader({
+    listTasksForUserFn: async (actor, opts = {}) => {
+      const userId =
+        actor?.userId ||
+        (actor?.telegramUserId != null
+          ? String(actor.telegramUserId)
+          : null);
+      if (!userId) return [];
+      return listTasksForActor(userId, {
+        limit: opts.limit || 40,
+        status: "active",
+      });
+    },
+  });
+
+  // Knowledge table has no owner column — fail closed (do not leak global rows).
   const knowledgeReader = createKnowledgeReader({});
 
   const ideasReader = createIdeasReader({
@@ -102,12 +135,11 @@ export function buildDefaultApp(env = process.env) {
 }
 
 export function startServer(env = process.env) {
-  const host = env.ALMAS_API_HOST || "127.0.0.1";
-  const port = Number(env.ALMAS_API_PORT) || 8787;
+  const { host, port } = resolveListenConfig(env);
   const app = buildDefaultApp(env);
 
   const server = app.listen(port, host, () => {
-    console.log(`ALMAS read-only API listening on http://${host}:${port}`);
+    console.log(`ALMAS API listening on http://${host}:${port}`);
   });
 
   const shutdown = (signal) => {

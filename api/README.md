@@ -88,9 +88,20 @@ Application-level filters are required but **do not replace database RLS**. Curr
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `BOT_TOKEN` | (required) | Telegram bot token for initData HMAC |
-| `ALMAS_API_HOST` | `127.0.0.1` | Bind host |
-| `ALMAS_API_PORT` | `8787` | Bind port |
-| `ALMAS_API_CORS_ORIGIN` | unset | Comma-separated allowlist (no `*`) |
+| `SUPABASE_URL` | (required for live reads) | Supabase project URL |
+| `SUPABASE_ANON_KEY` | (required for live reads) | Supabase anon/service key used by Node drivers |
+| `ALMAS_API_HOST` | `127.0.0.1` local / `0.0.0.0` when `PORT` set | Bind host |
+| `ALMAS_API_PORT` | `8787` | Local port when `PORT` unset |
+| `PORT` | (hosting-provided) | Public platform port (Railway/Render) — preferred when set |
+| `ALMAS_API_CORS_ORIGIN` | unset | Comma-separated allowlist (no `*`), e.g. Mini App HTTPS origin |
+
+## Hosted start
+
+```bash
+# Railway / Render start command (Procfile / railway.toml):
+node api/server.js
+# Health: GET /health  and  GET /api/health
+```
 
 ## Local run
 

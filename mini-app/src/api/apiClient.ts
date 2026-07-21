@@ -14,6 +14,8 @@ const mockClient: AlmasApiClient = {
   patchTask: (id, patch) => mockApi.patchTask(id, patch),
   getKnowledge: () => mockApi.getKnowledge(),
   getMemory: () => mockApi.getMemory(),
+  getIdeas: (opts) => mockApi.getIdeas(opts),
+  getIdea: (ideaId) => mockApi.getIdea(ideaId),
   getCaptureSession: (sessionId) => mockApi.getCaptureSession(sessionId),
   patchCaptureSession: (sessionId, body) =>
     mockApi.patchCaptureSession(sessionId, body),

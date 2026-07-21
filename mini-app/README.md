@@ -97,7 +97,11 @@ No PATCH/POST from the Mini App. Task checkboxes update local React state only i
 
 ## Future deployment
 
-1. Deploy `mini-app/dist` to public HTTPS.
-2. Deploy/run the ALMAS API behind HTTPS; set `VITE_ALMAS_API_URL` at Mini App build time; `VITE_ALMAS_API_MODE=live`.
-3. Set bot `ALMAS_WEB_APP_URL` to the Mini App HTTPS URL (`config/webapp.js`).
-4. Configure API CORS allowlist for the Mini App origin.
+1. Deploy `mini-app/dist` to public HTTPS (Vercel Root Directory = `mini-app`).
+2. Deploy the ALMAS API (`npm run api` / `node api/server.js`) to Railway/Render with public HTTPS.
+3. Set Vercel env (then **Redeploy** — Vite embeds at build time):
+   - `VITE_ALMAS_API_MODE=live`
+   - `VITE_ALMAS_API_URL=https://<your-public-api-host>`
+4. Set API env `ALMAS_API_CORS_ORIGIN=https://almas-framework-v2-five.vercel.app` (exact Mini App origin).
+5. Set bot `ALMAS_WEB_APP_URL` to the Mini App HTTPS URL and restart the bot.
+6. Apply Supabase migration `0006_create_capture_sessions.sql` before relying on Capture review across bot/API processes.

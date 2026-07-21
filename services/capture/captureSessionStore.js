@@ -1,7 +1,8 @@
 /**
  * Injectable Capture Session store (v1).
  * Primary: in-memory, one active session per actorKey+chatId.
- * Optional: best-effort Supabase persistence when available.
+ * Optional: best-effort Supabase persistence + load-by-id for cross-process
+ * Mini App API hosts (bot and API are separate Node processes).
  */
 
 import {
@@ -25,6 +26,7 @@ export function createCaptureSessionStore(options = {}) {
   /** @type {Set<string>} */
   const executedIds = options.executedIds || new Set();
   const persistFn = options.persistFn || null;
+  const loadByIdFn = options.loadByIdFn || null;
 
   async function maybePersist(session) {
     if (typeof persistFn !== "function" || !session) return;
@@ -99,7 +101,7 @@ export function createCaptureSessionStore(options = {}) {
       if (!session) return null;
       if (actorKey && session.actorKey !== actorKey) return null;
 
-      if (session.status === "pending") {
+      if (session.status === "pending" || session.status === "editing") {
         if (!isCaptureSessionActive(session, nowFn())) {
           session.status = "expired";
           indexById(session);
@@ -111,6 +113,43 @@ export function createCaptureSessionStore(options = {}) {
       }
 
       return isArchivedReadable(session) ? session : null;
+    },
+
+    /**
+     * Memory first, then optional durable load (Supabase) for cross-process API.
+     * @param {string} sessionId
+     * @param {string|null} [actorKey]
+     * @returns {Promise<object|null>}
+     */
+    async ensureLoaded(sessionId, actorKey = null) {
+      const local = this.getById(sessionId, actorKey);
+      if (local) return local;
+      if (typeof loadByIdFn !== "function") return null;
+
+      let remote = null;
+      try {
+        remote = await loadByIdFn(sessionId, actorKey);
+      } catch (error) {
+        console.error(
+          "[capture] loadById failed:",
+          error?.message || error
+        );
+        return null;
+      }
+      if (!remote || !remote.id) return null;
+      if (actorKey && remote.actorKey !== actorKey) return null;
+
+      indexById(remote);
+      if (
+        (remote.status === "pending" || remote.status === "editing") &&
+        isCaptureSessionActive(remote, nowFn())
+      ) {
+        map.set(
+          buildCaptureSessionKey(remote.actorKey, remote.chatId),
+          remote
+        );
+      }
+      return this.getById(sessionId, actorKey);
     },
 
     peek(actorKey, chatId) {
@@ -178,7 +217,44 @@ export function createCaptureSessionStore(options = {}) {
   };
 }
 
-export const defaultCaptureSessionStore = createCaptureSessionStore();
+/**
+ * Map a capture_sessions row into the in-memory session shape.
+ * @param {object} row
+ * @returns {object|null}
+ */
+export function mapCaptureSessionRow(row) {
+  if (!row || !row.id) return null;
+  const createdAt = row.created_at
+    ? Date.parse(row.created_at)
+    : Number(row.createdAt) || Date.now();
+  const expiresAt = row.expires_at
+    ? Date.parse(row.expires_at)
+    : Number(row.expiresAt) || createdAt;
+  const confirmedAt = row.confirmed_at
+    ? Date.parse(row.confirmed_at)
+    : row.confirmedAt != null
+      ? Number(row.confirmedAt)
+      : null;
+
+  return {
+    id: String(row.id),
+    actorKey: String(row.actor_key || row.actorKey || ""),
+    chatId: row.chat_id ?? row.chatId ?? null,
+    source: row.source || "text",
+    originalText: String(row.original_text || row.originalText || ""),
+    draft:
+      row.draft_json && typeof row.draft_json === "object"
+        ? row.draft_json
+        : row.draft && typeof row.draft === "object"
+          ? row.draft
+          : { actions: [] },
+    status: String(row.status || "pending"),
+    requestKey: row.request_key ?? row.requestKey ?? null,
+    createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
+    expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now(),
+    confirmedAt: Number.isFinite(confirmedAt) ? confirmedAt : null,
+  };
+}
 
 /**
  * Best-effort Supabase upsert (optional). Never throws to callers.
@@ -223,3 +299,60 @@ export async function persistCaptureSessionToSupabase(session, supabase) {
     return false;
   }
 }
+
+/**
+ * Load one capture session by id (actor-scoped). Returns null if missing/mismatch.
+ * @param {string} sessionId
+ * @param {string|null} actorKey
+ * @param {object} supabase
+ */
+export async function loadCaptureSessionFromSupabase(
+  sessionId,
+  actorKey,
+  supabase
+) {
+  if (!supabase || !sessionId) return null;
+  try {
+    const { data, error } = await supabase
+      .from("capture_sessions")
+      .select(
+        "id, actor_key, chat_id, source, original_text, draft_json, status, request_key, created_at, confirmed_at, expires_at"
+      )
+      .eq("id", String(sessionId))
+      .maybeSingle();
+
+    if (error || !data) return null;
+    const session = mapCaptureSessionRow(data);
+    if (!session) return null;
+    if (actorKey && session.actorKey !== actorKey) return null;
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Default store shared by Telegram bot + API in-process, with durable
+ * Supabase persistence when SUPABASE_* is configured (migration 0006).
+ */
+export function createDefaultCaptureSessionStore(options = {}) {
+  const client = options.supabase ?? null;
+
+  return createCaptureSessionStore({
+    ...options,
+    persistFn: async (session) => {
+      const sb =
+        client ||
+        (await import("../../providers/storage/supabase.js")).supabase;
+      return persistCaptureSessionToSupabase(session, sb);
+    },
+    loadByIdFn: async (sessionId, actorKey) => {
+      const sb =
+        client ||
+        (await import("../../providers/storage/supabase.js")).supabase;
+      return loadCaptureSessionFromSupabase(sessionId, actorKey, sb);
+    },
+  });
+}
+
+export const defaultCaptureSessionStore = createDefaultCaptureSessionStore();

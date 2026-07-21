@@ -74,7 +74,7 @@ describe("live API client", () => {
     const fetchFn: typeof fetch = async (input, init) => {
       calls.push(String(input));
       auths.push(String((init?.headers as Record<string, string>).Authorization));
-      const isList = /\/api\/(inbox|tasks|knowledge|finance\/transactions)/.test(
+      const isList = /\/api\/(inbox|tasks|knowledge|finance\/transactions|memory|ideas)/.test(
         String(input)
       );
       return new Response(
@@ -105,6 +105,8 @@ describe("live API client", () => {
     await api.getFinanceTransactions("today");
     await api.getTasks();
     await api.getKnowledge();
+    await api.getMemory();
+    await api.getIdeas();
 
     expect(calls).toEqual([
       "http://api.test/api/dashboard",
@@ -113,6 +115,8 @@ describe("live API client", () => {
       "http://api.test/api/finance/transactions?period=today",
       "http://api.test/api/tasks",
       "http://api.test/api/knowledge",
+      "http://api.test/api/memory",
+      "http://api.test/api/ideas",
     ]);
     expect(auths.every((h) => h === "tma raw-init")).toBe(true);
   });
@@ -189,6 +193,30 @@ describe("live API client", () => {
     expect(getApiMode({ VITE_ALMAS_API_MODE: "live" } as ImportMetaEnv)).toBe(
       "live"
     );
+  });
+
+  it("live mode without API URL fails honestly", async () => {
+    const api = createRealApi({
+      baseUrl: "",
+      getInitData: () => "raw",
+      fetchFn: vi.fn() as unknown as typeof fetch,
+    });
+    await expect(api.getFinanceSummary("month")).rejects.toMatchObject({
+      code: "unavailable",
+    });
+  });
+
+  it("live client never falls back to mock fixtures", async () => {
+    const live = resolveApiClient("live");
+    const mock = resolveApiClient("mock");
+    expect(live).not.toBe(mock);
+    await expect(
+      createRealApi({
+        baseUrl: "",
+        getInitData: () => "x",
+        fetchFn: vi.fn() as unknown as typeof fetch,
+      }).getMemory()
+    ).rejects.toMatchObject({ code: "unavailable" });
   });
 
   it("no direct Supabase imports or secrets in API client modules", () => {

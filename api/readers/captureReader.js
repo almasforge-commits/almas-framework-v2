@@ -23,7 +23,10 @@ export function createCaptureReader(deps = {}) {
         return { item: null, reason: "missing_actor" };
       }
 
-      const session = store.getById(sessionId, actorKey);
+      const session =
+        typeof store.ensureLoaded === "function"
+          ? await store.ensureLoaded(sessionId, actorKey)
+          : store.getById(sessionId, actorKey);
       if (!session) {
         return { item: null, reason: "not_found" };
       }

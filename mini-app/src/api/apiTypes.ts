@@ -105,6 +105,16 @@ export interface MemoryItem {
   type: string | null;
 }
 
+export interface IdeaItem {
+  id: string | null;
+  title: string | null;
+  text: string;
+  content: string;
+  category: string | null;
+  tags: string[];
+  createdAt: string | null;
+}
+
 export interface CaptureAction {
   type: string;
   confidence?: number;
@@ -164,6 +174,8 @@ export interface AlmasApiClient {
   patchTask(id: string, patch: { completed: boolean }): Promise<Task | null>;
   getKnowledge(): Promise<KnowledgeItem[]>;
   getMemory(): Promise<MemoryItem[]>;
+  getIdeas(opts?: { category?: string | null; q?: string | null }): Promise<IdeaItem[]>;
+  getIdea(ideaId: string): Promise<IdeaItem>;
   getCaptureSession(sessionId: string): Promise<CaptureSessionDetail>;
   patchCaptureSession(
     sessionId: string,

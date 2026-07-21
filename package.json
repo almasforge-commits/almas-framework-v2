@@ -6,7 +6,8 @@
     "type": "module",
     "scripts": {
         "start": "node index.js",
-        "api": "node api/server.js"
+        "api": "node api/server.js",
+        "start:api": "node api/server.js"
     },
     "dependencies": {
         "@supabase/supabase-js": "^2.110.7",

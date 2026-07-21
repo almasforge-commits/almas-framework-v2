@@ -12,6 +12,7 @@ import { Header } from "../components/Header";
 import { LoadingState } from "../components/LoadingState";
 import { MetricCard } from "../components/MetricCard";
 import { SectionCard } from "../components/SectionCard";
+import { isMockMode } from "../config/env";
 
 const PERIODS: Array<{ id: FinancePeriod; label: string }> = [
   { id: "today", label: "Today" },
@@ -45,7 +46,10 @@ export function FinancePage() {
 
   return (
     <div>
-      <Header title="Финансы" subtitle="Только просмотр · демо" />
+      <Header
+        title="Финансы"
+        subtitle={isMockMode() ? "Только просмотр · демо" : "Ваши финансы"}
+      />
       <div className="space-y-4 px-4 pt-4">
         <DemoNotice />
 

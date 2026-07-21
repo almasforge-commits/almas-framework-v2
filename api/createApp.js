@@ -77,6 +77,10 @@ export function createApp(deps) {
     res.json({ data: { ok: true } });
   });
 
+  app.get("/health", (_req, res) => {
+    res.json({ data: { ok: true } });
+  });
+
   const auth = createAuthTelegramMiddleware({
     botToken: deps.botToken,
     nowMs: deps.nowMs,

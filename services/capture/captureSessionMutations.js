@@ -21,7 +21,10 @@ export async function patchCaptureSessionActions(
   options = {}
 ) {
   const store = options.store || defaultCaptureSessionStore;
-  const session = store.getById(sessionId, actorKey);
+  const session =
+    typeof store.ensureLoaded === "function"
+      ? await store.ensureLoaded(sessionId, actorKey)
+      : store.getById(sessionId, actorKey);
   if (!session) {
     return { ok: false, reason: "not_found" };
   }
@@ -85,9 +88,12 @@ export async function confirmCaptureSessionById(
   const actorKey = actor?.actorKey;
   if (!actorKey) return { ok: false, reason: "missing_actor" };
 
-  const session = store.getById(sessionId, actorKey);
+  const session =
+    typeof store.ensureLoaded === "function"
+      ? await store.ensureLoaded(sessionId, actorKey)
+      : store.getById(sessionId, actorKey);
   if (!session) return { ok: false, reason: "not_found" };
-  if (session.status !== "pending") {
+  if (session.status !== "pending" && session.status !== "editing") {
     return { ok: false, reason: "not_pending", status: session.status };
   }
 
@@ -127,7 +133,10 @@ export async function cancelCaptureSessionById(
   options = {}
 ) {
   const store = options.store || defaultCaptureSessionStore;
-  const session = store.getById(sessionId, actorKey);
+  const session =
+    typeof store.ensureLoaded === "function"
+      ? await store.ensureLoaded(sessionId, actorKey)
+      : store.getById(sessionId, actorKey);
   if (!session) return { ok: false, reason: "not_found" };
   await store.clear(session.actorKey, session.chatId, "cancelled");
   return { ok: true, reason: "cancelled" };

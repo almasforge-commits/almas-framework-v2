@@ -7,6 +7,7 @@ import type {
   FinanceSummary,
   FinanceTransaction,
   HomePayload,
+  IdeaItem,
   InboxItem,
   KnowledgeItem,
   MemoryItem,
@@ -82,6 +83,25 @@ export function createRealApi(deps: Partial<LiveHttpDeps> = {}): AlmasApiClient 
     async getMemory(): Promise<MemoryItem[]> {
       const data = await liveGetJson<MemoryItem[]>("/api/memory", httpDeps);
       return assertArray<MemoryItem>(data, "memory");
+    },
+
+    async getIdeas(opts: { category?: string | null; q?: string | null } = {}): Promise<IdeaItem[]> {
+      const params = new URLSearchParams();
+      if (opts.category) params.set("category", opts.category);
+      if (opts.q) params.set("q", opts.q);
+      const qs = params.toString();
+      const data = await liveGetJson<IdeaItem[]>(
+        `/api/ideas${qs ? `?${qs}` : ""}`,
+        httpDeps
+      );
+      return assertArray<IdeaItem>(data, "ideas");
+    },
+
+    async getIdea(ideaId: string): Promise<IdeaItem> {
+      return liveGetJson<IdeaItem>(
+        `/api/ideas/${encodeURIComponent(ideaId)}`,
+        httpDeps
+      );
     },
 
     async getCaptureSession(sessionId: string): Promise<CaptureSessionDetail> {
