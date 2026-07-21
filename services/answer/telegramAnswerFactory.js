@@ -17,6 +17,7 @@ import { getBalance } from "../finance/financeService.js";
 import { getActiveTasks } from "../storage/taskService.js";
 import { searchKnowledge } from "../search/knowledgeSearchService.js";
 import { searchMemories } from "../storage/memoryService.js";
+import { searchIdeas } from "../ideas/ideaService.js";
 import { createWorldKnowledgeForTelegram } from "../worldKnowledge/worldKnowledgeFactory.js";
 
 /**
@@ -74,6 +75,10 @@ export function createTelegramAnswerEngine(overrides = {}) {
       overrides.searchMemoryFn ??
       (async (query, { actorKey } = {}) =>
         searchMemories(query, { actorKey })),
+    searchIdeasFn:
+      overrides.searchIdeasFn ??
+      (async (query, { actorKey } = {}) =>
+        searchIdeas(query, { actorKey })),
     includeDebug: overrides.includeDebug === true,
     nowFn: overrides.nowFn,
   });

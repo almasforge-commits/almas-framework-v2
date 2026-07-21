@@ -1,7 +1,16 @@
 /**
  * Format Answer Engine result for Telegram — read-only text only.
- * Never invents facts beyond engine output.
+ * Ideas domain intents use Ideas formatters (not the generic prose wrapper).
  */
+
+import { formatIdeaSearch } from "../ideas/ideaFormatters.js";
+
+const IDEAS_INTENTS = new Set([
+  "ideas_list",
+  "ideas_open",
+  "ideas_search",
+  "ideas_query",
+]);
 
 /**
  * @param {object} result - createAnswerResult shape
@@ -28,6 +37,37 @@ export function formatTelegramAnswerReply(result) {
 
   if (!answer) {
     return "Пока я этого не знаю.";
+  }
+
+  const intent = String(result.intent || "");
+  const ideasOnly =
+    IDEAS_INTENTS.has(intent) ||
+    (Array.isArray(result.usedDomains) &&
+      result.usedDomains.length === 1 &&
+      result.usedDomains[0] === "ideas");
+
+  if (ideasOnly) {
+    // Reconstruct a numbered Ideas search view from evidence lines.
+    const ideas = (Array.isArray(result.sources) ? result.sources : [])
+      .filter((s) => String(s.domain || "").startsWith("ideas/"))
+      .map((s, i) => ({
+        title: extractIdeaTitleFromAnswer(answer, i),
+        normalizedText: extractIdeaTitleFromAnswer(answer, i),
+        category: String(s.domain || "ideas/other").replace(/^ideas\//, ""),
+      }));
+
+    if (ideas.length) {
+      return formatIdeaSearch({ ideas, query: "", category: null });
+    }
+
+    // Fallback: keep Idea lines without the generic Answer chrome.
+    const lines = answer
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    return ["💡", "", ...lines.map((l, i) => `${i + 1}. ${stripTrailingDot(l)}`)].join(
+      "\n"
+    );
   }
 
   const confidence = Number(result.confidence);
@@ -60,4 +100,16 @@ export function formatTelegramAnswerReply(result) {
     : "";
 
   return `🧠 Ответ\n\n${answer}${confLine}${conflictLine}${sourcesBlock}`;
+}
+
+function extractIdeaTitleFromAnswer(answer, index) {
+  const lines = String(answer || "")
+    .split("\n")
+    .map((l) => stripTrailingDot(l.trim()))
+    .filter(Boolean);
+  return lines[index] || lines[0] || "Идея";
+}
+
+function stripTrailingDot(s) {
+  return String(s || "").replace(/\.+$/u, "");
 }

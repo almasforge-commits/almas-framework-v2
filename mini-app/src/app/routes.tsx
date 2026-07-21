@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { HomePage } from "../pages/HomePage";
 import { InboxPage } from "../pages/InboxPage";
 import { FinancePage } from "../pages/FinancePage";
@@ -6,6 +6,16 @@ import { TasksPage } from "../pages/TasksPage";
 import { MorePage } from "../pages/MorePage";
 import { KnowledgePage } from "../pages/KnowledgePage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
+import { CaptureSessionPage } from "../pages/CaptureSessionPage";
+import { MemoryPage } from "../pages/MemoryPage";
+import { IdeasPage } from "../pages/IdeasPage";
+
+/** Strip legacy /almas prefix used by older Telegram deep links. */
+function LegacyAlmasRedirect() {
+  const params = useParams();
+  const rest = params["*"] ? `/${params["*"]}` : "/";
+  return <Navigate to={rest} replace />;
+}
 
 export function AppRoutes() {
   return (
@@ -16,10 +26,10 @@ export function AppRoutes() {
       <Route path="/tasks" element={<TasksPage />} />
       <Route path="/more" element={<MorePage />} />
       <Route path="/knowledge" element={<KnowledgePage />} />
-      <Route
-        path="/ideas"
-        element={<PlaceholderPage title="Идеи" icon="💡" />}
-      />
+      <Route path="/memory" element={<MemoryPage />} />
+      <Route path="/ideas" element={<IdeasPage />} />
+      <Route path="/ideas/:ideaId" element={<IdeasPage />} />
+      <Route path="/capture/:sessionId" element={<CaptureSessionPage />} />
       <Route
         path="/projects"
         element={<PlaceholderPage title="Проекты" icon="🚀" />}
@@ -40,6 +50,9 @@ export function AppRoutes() {
         path="/settings"
         element={<PlaceholderPage title="Настройки" icon="⚙️" />}
       />
+      {/* Temporary compat for Telegram buttons generated before root migration */}
+      <Route path="/almas" element={<Navigate to="/" replace />} />
+      <Route path="/almas/*" element={<LegacyAlmasRedirect />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

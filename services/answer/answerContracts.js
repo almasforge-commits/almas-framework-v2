@@ -21,6 +21,7 @@ export const EVIDENCE_SOURCES = Object.freeze([
   "tasks",
   "knowledge",
   "memory",
+  "ideas",
 ]);
 
 export const EXECUTION_NONE = Object.freeze({
@@ -38,6 +39,7 @@ export const SOURCE_TRUST = Object.freeze({
   tasks: 0.95,
   knowledge: 0.8,
   memory: 0.8,
+  ideas: 0.85,
   world_knowledge: 0.4,
 });
 
@@ -124,6 +126,8 @@ export function createAnswerResult(input = {}) {
     sources,
     evidenceSummary: sanitizeEvidenceSummary(input.evidenceSummary),
     usedDomains: uniqueStrings(input.usedDomains),
+    intent:
+      input.intent != null ? String(input.intent).slice(0, 64) : "general",
     usedReasoning: Boolean(input.usedReasoning),
     usedPersonalKnowledge: Boolean(input.usedPersonalKnowledge),
     usedWorldKnowledge: Boolean(input.usedWorldKnowledge),

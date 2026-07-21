@@ -446,7 +446,7 @@ async function run() {
     await sendAiExecutionConfirmations("chat1", owned, {
       sendMessageFn: async (_chatId, message) => sent.push(message),
     });
-    assert.deepEqual(sent, ["✅ Задача сохранена\n\nкупить батарейки"]);
+    assert.deepEqual(sent, ["✅ Task saved.\n\nOpen Tasks →"]);
 
     // Whole mixed message must not be Memory-eligible as a note.
     assert.equal(shouldSaveMemory(text), false);

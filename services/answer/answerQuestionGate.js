@@ -5,6 +5,7 @@
 
 import { detectDeterministicIntent } from "../inbox/deterministicIntentDetector.js";
 import { extractLegacyMemorySaveContent } from "../storage/memoryFilter.js";
+import { isIdeasRetrievalQuery } from "../ideas/ideaQueryIntent.js";
 
 const READ_ONLY_TYPES = new Set(["chat", "search"]);
 
@@ -108,6 +109,16 @@ export function classifyAnswerRouteIntent(text, deps = {}) {
     };
   }
 
+  // Ideas list/search must use Answer Engine even without "?".
+  if (isIdeasRetrievalQuery(trimmed)) {
+    return {
+      useAnswerEngine: true,
+      reason: "ideas_query",
+      query: trimmed,
+      actionType: "chat",
+    };
+  }
+
   const detectFn = deps.detectIntentFn ?? detectDeterministicIntent;
   const contract = detectFn(trimmed);
 
@@ -124,6 +135,16 @@ export function classifyAnswerRouteIntent(text, deps = {}) {
     const action = contract.actions[0];
     const type = action?.type;
     const reasonCode = contract.reasonCode;
+
+    // Ideas list/search is Tier-0 chat — always Answer Engine.
+    if (reasonCode === "ideas_query" || type === "chat" && action?.payload?.domain === "ideas") {
+      return {
+        useAnswerEngine: true,
+        reason: "ideas_query",
+        query: (action.payload && action.payload.query) || trimmed,
+        actionType: "chat",
+      };
+    }
 
     if (
       reasonCode === "youtube_link" ||
@@ -152,7 +173,7 @@ export function classifyAnswerRouteIntent(text, deps = {}) {
       };
     }
 
-    if (type === "system_command" || type === "task_create" || type === "memory_save") {
+    if (type === "system_command" || type === "task_create" || type === "memory_save" || type === "idea_create") {
       return {
         useAnswerEngine: false,
         reason: "execution_or_command",

@@ -15,6 +15,11 @@ import { detectIncompleteIntent } from "../../services/context/contextContracts.
 import { isAiRouterExecutionActive } from "../../config/aiRouter.js";
 import { parseFinanceMessage } from "../../services/finance/financeParser.js";
 import { missingFinanceClarificationFields } from "../../services/context/contextContracts.js";
+import {
+  MINI_APP_PATHS,
+  THIN_CONFIRM,
+  withMiniAppOpenButton,
+} from "../../config/deepLinks.js";
 
 let botPromise = null;
 
@@ -25,8 +30,8 @@ function getBot() {
   return botPromise;
 }
 
-const defaultSendMessageFn = async (chatId, text) =>
-  (await getBot()).sendMessage(chatId, text);
+const defaultSendMessageFn = async (chatId, text, extra) =>
+  (await getBot()).sendMessage(chatId, text, extra);
 
 /**
  * Process pending clarification answers, or start incomplete task/memory.
@@ -107,7 +112,9 @@ export async function handleClarificationTurn(input = {}, options = {}) {
       });
 
       if (executed.message) {
-        await safeSend(sendMessageFn, chatId, executed.message);
+        await safeSend(sendMessageFn, chatId, executed.message, {
+          reply_markup: executed.reply_markup,
+        });
       }
       return { handled: true, reason: "completed" };
     }
@@ -272,8 +279,15 @@ async function executeCompletedDraft({
     );
 
     if (executedCount > 0 && results[0]) {
-      const message = formatAiExecutionConfirmation(results[0]);
-      return { ok: true, message: message || "✅ Готово." };
+      const confirmation = formatAiExecutionConfirmation(results[0]);
+      if (confirmation && typeof confirmation === "object") {
+        return {
+          ok: true,
+          message: confirmation.text || "✅ Готово.",
+          reply_markup: confirmation.reply_markup,
+        };
+      }
+      return { ok: true, message: confirmation || "✅ Готово." };
     }
     return {
       ok: false,
@@ -317,16 +331,22 @@ async function executeCompletedDraft({
     const label = type === "finance_income" ? "Доход" : "Расход";
     return {
       ok: true,
-      message: `💰 ${label} сохранён\n\nСумма: ${amount.toLocaleString()} ${currency}\nОписание: ${description || "Без описания"}`,
+      message: `${THIN_CONFIRM.finance}\n\n${THIN_CONFIRM.openFinance}`,
+      reply_markup: withMiniAppOpenButton(
+        {},
+        MINI_APP_PATHS.finance,
+        THIN_CONFIRM.openFinance
+      ).reply_markup,
+      label,
     };
   }
 
   return { ok: false, message: null };
 }
 
-async function safeSend(sendMessageFn, chatId, text) {
+async function safeSend(sendMessageFn, chatId, text, extra) {
   try {
-    await sendMessageFn(chatId, text);
+    await sendMessageFn(chatId, text, extra);
   } catch (error) {
     console.error("[clarification] sendMessage failed");
   }

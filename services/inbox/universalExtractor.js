@@ -175,6 +175,8 @@ export function extractIdeaDeterministic(text) {
   const m =
     t.match(/^\s*(?:идея\s*[:：]|idea\s*[:：]|idea\s+for)\s*(.+)$/i) ||
     t.match(/^\s*у\s+меня\s+идея\s*[:：]?\s*(.+)$/i) ||
+    t.match(/^\s*(?:есть|пришла|появилась)\s+идея\s*[:：]?\s*(.+)$/i) ||
+    t.match(/^\s*появилась\s+мысль\s*[:：]?\s*(.+)$/i) ||
     t.match(/(?:^|[\s,])придумал(?:а|и)?\s+(.+?)(?:\s+и\s+завтра|\s*$)/i);
 
   if (!m) return null;

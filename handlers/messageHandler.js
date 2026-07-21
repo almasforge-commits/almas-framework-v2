@@ -58,12 +58,34 @@ import {
   startInboxReceivedObservation,
 } from "../services/inbox/inboxObservation.js";
 import { sendAiExecutionConfirmations } from "./routes/aiExecutionRoute.js";
+import { maybeCaptureIdea, maybeHandleIdeasExperience } from "./routes/ideaRoute.js";
+import {
+  isKnowledgeListCommand,
+  isKnowledgeOpenCommand,
+  extractKnowledgeIndex,
+} from "../services/ideas/ideaQueryIntent.js";
 import {
   handleClarificationTurn,
   maybeStartClarificationFromAiDecision,
   maybeStartClarificationFromFinanceAttempt,
 } from "./routes/clarificationRoute.js";
 import { maybeHandleAnswerQuestion } from "./routes/answerRoute.js";
+import {
+  maybeHandleNavigation,
+  keepNavigationContextAfterOpen,
+} from "../services/navigation/navigationRoute.js";
+import { defaultNavigationContextStore } from "../services/navigation/navigationContextStore.js";
+import { shouldDeferMeaninglessForNav } from "../services/navigation/navigationResolver.js";
+import {
+  maybeHandleCaptureSessionCreate,
+  maybeHandleCaptureSessionTurn,
+} from "./routes/captureRoute.js";
+import {
+  MINI_APP_PATHS,
+  THIN_CONFIRM,
+  withMiniAppOpenButton,
+  thinOpenReply,
+} from "../config/deepLinks.js";
 
 import {
   sendMainMenu,
@@ -72,6 +94,7 @@ import {
   sendTasksMenu,
   sendFinanceMenu,
   sendMemoryMenu,
+  sendIdeasMenu,
   sendIdeasPlaceholder,
   sendProjectsPlaceholder,
   sendOpenAlmas,
@@ -111,19 +134,36 @@ export async function routeText(chatId, text, from, options = {}) {
   // Navigation menu fast path — MUST run before any AI routing call.
   // Menu labels (/start, "меню", section buttons) must never reach
   // Tier 1/Tier 2, never create Memory/Tasks/Finance, and never produce
-  // AI actions. Stateless: search/recall buttons only reply with the
-  // typed command to use.
+  // AI actions. Ideas/Memory open real actor-scoped lists.
+  const menuActor = buildActorFromTelegram(from, chatId);
   const menuHandler = {
-    "меню": () => sendMainMenu(chatId),
-    "/start": () => sendMainMenu(chatId),
-    "🏠 главная": () => sendMainMenu(chatId),
-    "📚 знания": () => sendKnowledgeMenu(chatId),
-    "💡 идеи": () => sendIdeasPlaceholder(chatId),
-    "📋 задачи": () => sendTasksMenu(chatId),
+    "меню": () =>
+      sendMainMenu(chatId, { actorKey: menuActor?.actorKey }),
+    "/start": () =>
+      sendMainMenu(chatId, { actorKey: menuActor?.actorKey }),
+    "🏠 главная": () =>
+      sendMainMenu(chatId, { actorKey: menuActor?.actorKey }),
+    "📚 знания": () =>
+      sendKnowledgeMenu(chatId, { actorKey: menuActor?.actorKey }),
+    "💡 идеи": () =>
+      sendIdeasMenu(chatId, {
+        actorKey: menuActor?.actorKey,
+        userId: from?.id,
+      }),
+    "📋 задачи": () =>
+      sendTasksMenu(chatId, { actorKey: menuActor?.actorKey }),
     "🚀 проекты": () => sendProjectsPlaceholder(chatId),
-    "💰 финансы": () => sendFinanceMenu(chatId, String(from.id)),
-    "🧠 память": () => sendMemoryMenu(chatId),
+    "💰 финансы": () =>
+      sendFinanceMenu(chatId, String(from.id), {
+        actorKey: menuActor?.actorKey,
+      }),
+    "🧠 память": () =>
+      sendMemoryMenu(chatId, {
+        userId: from?.id,
+        actorKey: menuActor?.actorKey,
+      }),
     "🌐 открыть almas": () => sendOpenAlmas(chatId),
+    "❓ как пользоваться": () => sendHelp(chatId),
     "❓ помощь": () => sendHelp(chatId),
   }[normalizedText];
 
@@ -133,12 +173,20 @@ export async function routeText(chatId, text, from, options = {}) {
   }
 
   // Bare numbers / single punctuation / empty noise — never call AI,
-  // never auto-save Memory. Show the short menu fallback instead.
-  // Real commands that merely contain numbers ("открыть 4", "выполнено 4",
-  // "расход 40000 кофе") are not matched by this check.
-  if (isMeaninglessShortInput(text)) {
-    await sendFallback(chatId);
-    return;
+  // never auto-save Memory. Exception: bare numbers with an active
+  // navigation context are follow-ups (e.g. "4" after Knowledge list).
+  {
+    const navPeek = defaultNavigationContextStore.peek(
+      menuActor?.actorKey,
+      chatId
+    );
+    if (
+      isMeaninglessShortInput(text) &&
+      !shouldDeferMeaninglessForNav(text, navPeek)
+    ) {
+      await sendFallback(chatId);
+      return;
+    }
   }
 
   const requestKey = buildRequestKey({ chatId, messageId, text });
@@ -187,6 +235,55 @@ export async function routeText(chatId, text, from, options = {}) {
   });
   if (clarificationTurn.handled) {
     return;
+  }
+
+  // Navigation context follow-ups + exact domain open commands
+  // (before Finance / Tasks / Ideas / Knowledge / Memory).
+  const navTurn = await maybeHandleNavigation(
+    { chatId, text, from, actor },
+    {
+      store: defaultNavigationContextStore,
+      sendMainMenuFn: (c) =>
+        sendMainMenu(c, { actorKey: actor?.actorKey }),
+    }
+  );
+  if (navTurn.handled) {
+    return;
+  }
+
+  // Pending Capture Session: confirm / edit / cancel (before new writes).
+  {
+    const captureTurn = await maybeHandleCaptureSessionTurn(
+      { chatId, text, from, actor },
+      {}
+    );
+    if (captureTurn.handled) {
+      return;
+    }
+  }
+
+  // Start Capture Session for mixed / long / voice multi-entity messages.
+  // Confirm-first — no domain writes until the user taps Сохранить всё.
+  {
+    const captureStart = await maybeHandleCaptureSessionCreate(
+      {
+        chatId,
+        text,
+        from,
+        actor,
+        requestKey,
+        inputSource,
+      },
+      {
+        // Enrich with Universal Extraction when OpenAI is available;
+        // deterministic draft remains the offline/safe baseline.
+        useUniversalExtraction: true,
+        allowDefaultProvider: true,
+      }
+    );
+    if (captureStart.handled) {
+      return;
+    }
   }
 
   // AI Intent Analyzer / Action Planner — execution-ownership boundary.
@@ -325,13 +422,9 @@ export async function routeText(chatId, text, from, options = {}) {
   if (finances.length > 1) {
 
     console.log(">>> MULTI MODE");
-    let total = 0;
-    let message = "💸 Расходы сохранены\n\n";
     for (const finance of finances) {
 
       console.log("Saving:", finance);
-      total += finance.amount;
-      message += `• ${finance.description} — ${finance.amount.toLocaleString()} ${finance.currency}\n`;
 
       if (finance.type === "expense") {
 
@@ -362,9 +455,11 @@ export async function routeText(chatId, text, from, options = {}) {
 
     console.log(">>> FINISHED");
 
-    message += `\n━━━━━━━━━━━━━━\n💰 Итого: ${total.toLocaleString()} VND`;
-
-    await bot.sendMessage(chatId, message);
+    await bot.sendMessage(
+      chatId,
+      `${THIN_CONFIRM.finance}\n\n${THIN_CONFIRM.openFinance}`,
+      withMiniAppOpenButton({}, MINI_APP_PATHS.finance, THIN_CONFIRM.openFinance)
+    );
 
     return;
   }
@@ -382,10 +477,8 @@ export async function routeText(chatId, text, from, options = {}) {
 
       await bot.sendMessage(
         chatId,
-        `💸 Расход сохранён
-    
-    Сумма: ${finance.amount.toLocaleString()} ${finance.currency}
-    Описание: ${finance.description || "Без описания"}`
+        `${THIN_CONFIRM.finance}\n\n${THIN_CONFIRM.openFinance}`,
+        withMiniAppOpenButton({}, MINI_APP_PATHS.finance, THIN_CONFIRM.openFinance)
       );
 
       return;
@@ -402,10 +495,8 @@ export async function routeText(chatId, text, from, options = {}) {
 
       await bot.sendMessage(
         chatId,
-        `💰 Доход сохранён
-    
-    Сумма: ${finance.amount.toLocaleString()} ${finance.currency}
-    Описание: ${finance.description || "Без описания"}`
+        `${THIN_CONFIRM.finance}\n\n${THIN_CONFIRM.openFinance}`,
+        withMiniAppOpenButton({}, MINI_APP_PATHS.finance, THIN_CONFIRM.openFinance)
       );
 
       return;
@@ -450,96 +541,41 @@ export async function routeText(chatId, text, from, options = {}) {
     if (answered.handled) return;
   }
 
-// Мои знания
-if (text.toLowerCase() === "мои знания") {
-
-  const knowledge = await getAllKnowledge();
-
-  if (knowledge.length === 0) {
-    await bot.sendMessage(chatId, "📚 База знаний пока пуста.");
-    return;
-  }
-
-  let message = `📚 Всего знаний: ${knowledge.length}\n\n`;
-
-  knowledge.forEach((item, index) => {
-    message += `${index + 1}. ${item.title}\n`;
-  });
-
-  await bot.sendMessage(chatId, message);
-
+// Мои знания / Покажи мои знания
+if (isKnowledgeListCommand(text)) {
+  const reply = thinOpenReply(
+    `📚 Knowledge\n\n${THIN_CONFIRM.openKnowledge}`,
+    MINI_APP_PATHS.knowledge,
+    THIN_CONFIRM.openKnowledge
+  );
+  await bot.sendMessage(chatId, reply.text, { reply_markup: reply.reply_markup });
   return;
 }
 
-// Открыть знание
-if (
-  text.toLowerCase().startsWith("открыть ") ||
-  text.toLowerCase().startsWith("покажи ")
-) {
-
-  const index = Number(text.split(" ")[1]);
-
-  if (Number.isNaN(index)) {
+// Открыть знание N — thin deep link (detail in Mini App)
+if (isKnowledgeOpenCommand(text)) {
+  const index = extractKnowledgeIndex(text);
+  if (index == null || Number.isNaN(index)) {
     await bot.sendMessage(chatId, "❌ Укажи номер знания.");
     return;
   }
-
   const knowledge = await getKnowledgeByIndex(index);
-
   if (!knowledge) {
     await bot.sendMessage(chatId, "❌ Знание не найдено.");
     return;
   }
-
-  const keyPoints = knowledge.keyPoints
-    .map(item => `• ${item}`)
-    .join("\n");
-
-  const ideas = (knowledge.ideas ?? []).length
-    ? knowledge.ideas.map(item => `• ${item}`).join("\n")
-    : "Нет";
-
-  const tasks = (knowledge.tasks ?? []).length
-    ? knowledge.tasks.map(item => `• ${item}`).join("\n")
-    : "Нет";
-
-  const tags = (knowledge.tags ?? []).length
-    ? knowledge.tags.map(tag => `#${tag}`).join(" ")
-    : "Нет";
-
-  await bot.sendMessage(
-    chatId,
-`📚 ${knowledge.title}
-
-━━━━━━━━━━━━━━
-
-📝 ${knowledge.summary}
-
-━━━━━━━━━━━━━━
-
-💡 Основные мысли
-
-${keyPoints}
-
-━━━━━━━━━━━━━━
-
-🏷️ Теги
-
-${tags}
-
-━━━━━━━━━━━━━━
-
-🚀 Идеи
-
-${ideas}
-
-━━━━━━━━━━━━━━
-
-✅ Задачи
-
-${tasks}`
+  const reply = thinOpenReply(
+    `📚 Knowledge ready.\n\n${THIN_CONFIRM.openKnowledge}`,
+    MINI_APP_PATHS.knowledge,
+    THIN_CONFIRM.openKnowledge
   );
-
+  await bot.sendMessage(chatId, reply.text, { reply_markup: reply.reply_markup });
+  keepNavigationContextAfterOpen(
+    defaultNavigationContextStore,
+    actor?.actorKey,
+    chatId,
+    { section: "knowledge", cursor: index }
+  );
   return;
 }
 
@@ -558,275 +594,80 @@ if (
 
 // Мои задачи
 if (text.toLowerCase() === "мои задачи") {
-
-  const tasks = await getActiveTasks();
-
-  if (tasks.length === 0) {
-    await bot.sendMessage(chatId, "📋 У тебя пока нет активных задач.");
-    return;
-  }
-
-  let message = "📋 Активные задачи\n\n";
-
-  tasks.forEach((task, index) => {
-    message += `${index + 1}. ${task.content}\n`;
-  });
-
-  await bot.sendMessage(chatId, message);
-
+  const reply = thinOpenReply(
+    `📋 Tasks\n\n${THIN_CONFIRM.openTasks}`,
+    MINI_APP_PATHS.tasks,
+    THIN_CONFIRM.openTasks
+  );
+  await bot.sendMessage(chatId, reply.text, { reply_markup: reply.reply_markup });
   return;
 }
 
 // Выполнить задачу
 if (text.toLowerCase().startsWith("выполнено ")) {
-
   const index = Number(text.split(" ")[1]);
-
   if (Number.isNaN(index)) {
     await bot.sendMessage(chatId, "❌ Укажи номер задачи.");
     return;
   }
-
   const task = await completeTask(index);
-
   if (!task) {
     await bot.sendMessage(chatId, "❌ Задача не найдена.");
     return;
   }
-
-  await bot.sendMessage(
-    chatId,
-    `✅ Выполнено
-
-${task.content}`
+  const reply = thinOpenReply(
+    `✅ Done.\n\n${THIN_CONFIRM.openTasks}`,
+    MINI_APP_PATHS.tasks,
+    THIN_CONFIRM.openTasks
   );
-
+  await bot.sendMessage(chatId, reply.text, { reply_markup: reply.reply_markup });
   return;
 }
 
 // Выполненные задачи
 if (text.toLowerCase() === "выполненные задачи") {
-
-  const tasks = await getCompletedTasks();
-
-  if (tasks.length === 0) {
-    await bot.sendMessage(chatId, "✅ Пока нет выполненных задач.");
-    return;
-  }
-
-  let message = "✅ Выполненные задачи\n\n";
-
-  tasks.forEach((task, index) => {
-    message += `${index + 1}. ${task.content}\n`;
-  });
-
-  await bot.sendMessage(chatId, message);
-
-  return;
-}
-
-// Баланс
-if (text.toLowerCase() === "баланс") {
-
-  const balances = await getBalance(String(from.id));
-
-  if (!Object.keys(balances).length) {
-    await bot.sendMessage(chatId, "История пока пустая.");
-    return;
-  }
-
-  const flags = {
-    VND: "🇻🇳",
-    USD: "🇺🇸",
-    KZT: "🇰🇿",
-    RUB: "🇷🇺",
-    EUR: "🇪🇺",
-  };
-
-  let message = "💰 Баланс\n\n";
-
-  for (const [currency, data] of Object.entries(balances)) {
-
-    message += `${flags[currency] || "💵"} ${currency}\n`;
-    message += `Доход: ${Number(data.income).toLocaleString()}\n`;
-    message += `Расход: ${Number(data.expense).toLocaleString()}\n`;
-    message += `Остаток: ${Number(data.balance).toLocaleString()}\n\n`;
-  }
-
-  await bot.sendMessage(chatId, message);
-
-  return;
-}
-
-// История
-if (text.toLowerCase() === "история") {
-
-  const history = await getHistory(String(from.id));
-
-  if (!history.length) {
-    await bot.sendMessage(chatId, "История пока пустая.");
-    return;
-  }
-
-  let message = "📒 Последние операции\n\n";
-
-  history.forEach((item, index) => {
-    const emoji = item.type === "income" ? "💰" : "💸";
-
-    message += `${index + 1}. ${emoji} ${Number(item.amount).toLocaleString()} ${item.currency || "VND"}`;
-
-    if (item.category) {
-      message += ` • ${item.category}`;
-    }
-
-    if (item.description) {
-      message += ` — ${item.description}`;
-    }
-
-    message += "\n";
-  });
-
-  await bot.sendMessage(chatId, message);
-
-  return;
-}
-
-// Статистика
-if (text.toLowerCase() === "статистика") {
-
-  const stats = await getStatistics(String(from.id));
-
-  if (!stats || stats.transactions === 0) {
-    await bot.sendMessage(chatId, "История пока пустая.");
-    return;
-  }
-
-  let message = "📊 Статистика\n\n";
-
-  message += `📒 Операций: ${stats.transactions}\n\n`;
-
-  message += "📈 Доходы\n";
-
-  for (const [currency, amount] of Object.entries(stats.incomes)) {
-    message += `• ${currency}: ${Number(amount).toLocaleString()}\n`;
-  }
-
-  message += "\n📉 Расходы\n";
-
-  for (const [currency, amount] of Object.entries(stats.expenses)) {
-    message += `• ${currency}: ${Number(amount).toLocaleString()}\n`;
-  }
-
-  if (stats.biggestExpense) {
-    message += `
-
-━━━━━━━━━━━━━━
-
-🏆 Самая большая покупка
-
-${stats.biggestExpense.description || "Без описания"}
-
-${Number(stats.biggestExpense.amount).toLocaleString()} ${stats.biggestExpense.currency}`;
-  }
-
-  await bot.sendMessage(chatId, message);
-
-  return;
-}
-
-// Сколько потратил на...
-if (text.toLowerCase().startsWith("сколько потратил на ")) {
-
-  const categoryInput = text
-    .slice("сколько потратил на ".length)
-    .trim()
-    .toLowerCase();
-
-  const categoryMap = {
-    "кафе": "Кафе",
-    "продукты": "Продукты",
-    "транспорт": "Транспорт",
-    "развлечения": "Развлечения",
-    "здоровье": "Здоровье",
-    "одежда": "Одежда",
-    "другое": "Другое",
-  };
-
-  const category = categoryMap[categoryInput];
-
-  if (!category) {
-    await bot.sendMessage(chatId, "❌ Неизвестная категория.");
-    return;
-  }
-
-  const expenses = await getCategoryExpenses(
-    String(from.id),
-    category
+  const reply = thinOpenReply(
+    `📋 Tasks\n\n${THIN_CONFIRM.openTasks}`,
+    MINI_APP_PATHS.tasks,
+    THIN_CONFIRM.openTasks
   );
-
-  if (!Object.keys(expenses).length) {
-    await bot.sendMessage(
-      chatId,
-      `По категории "${category}" расходов пока нет.`
-    );
-    return;
-  }
-
-  let message = `📊 ${category}\n\n`;
-
-  for (const [currency, amount] of Object.entries(expenses)) {
-    message += `💸 ${Number(amount).toLocaleString()} ${currency}\n`;
-  }
-
-  await bot.sendMessage(chatId, message);
-
+  await bot.sendMessage(chatId, reply.text, { reply_markup: reply.reply_markup });
   return;
 }
 
-// Расходы за период
+// Finance reads → Mini App
 if (
+  text.toLowerCase() === "баланс" ||
+  text.toLowerCase() === "история" ||
+  text.toLowerCase() === "статистика" ||
+  text.toLowerCase().startsWith("сколько потратил на ") ||
   text.toLowerCase() === "расходы за сегодня" ||
   text.toLowerCase() === "расходы за неделю" ||
   text.toLowerCase() === "расходы за месяц"
 ) {
-
-  let days = 30;
-  let title = "месяц";
-
-  if (text.toLowerCase() === "расходы за сегодня") {
-    days = 1;
-    title = "сегодня";
-  }
-
-  if (text.toLowerCase() === "расходы за неделю") {
-    days = 7;
-    title = "неделю";
-  }
-
-  const totals = await getExpensesByPeriod(
-    String(from.id),
-    days
+  const reply = thinOpenReply(
+    `💰 Finance\n\n${THIN_CONFIRM.openFinance}`,
+    MINI_APP_PATHS.finance,
+    THIN_CONFIRM.openFinance
   );
-
-  if (!Object.keys(totals).length) {
-    await bot.sendMessage(chatId, "За этот период расходов нет.");
-    return;
-  }
-
-  let message = `📅 Расходы за ${title}\n\n`;
-
-  for (const [currency, amount] of Object.entries(totals)) {
-    message += `💸 ${Number(amount).toLocaleString()} ${currency}\n`;
-  }
-
-  await bot.sendMessage(chatId, message);
-
+  await bot.sendMessage(chatId, reply.text, { reply_markup: reply.reply_markup });
   return;
 }
+
     // YouTube
 if (isYouTubeLink(text)) {
   await handleYouTube(chatId, text);
   return;
+}
+
+// Ideas domain experience (list / open / search) — before Answer Engine
+// so Ideas are not collapsed into a generic prose summary.
+{
+  const ideasRead = await maybeHandleIdeasExperience(
+    { chatId, text, from, actor },
+    {}
+  );
+  if (ideasRead.handled) return;
 }
 
 // Read-only Answer Engine — open information questions that fell through
@@ -837,6 +678,25 @@ if (isYouTubeLink(text)) {
     {}
   );
   if (answered.handled) return;
+}
+
+// Ideas Capture — save immediately without forcing a category.
+// Skipped when AI router already executed idea_create for this message.
+if (
+  !aiOwnership.executedActions.some((r) => r?.action?.type === "idea_create") &&
+  !isUnparsedFinanceAttempt
+) {
+  const ideaCaptured = await maybeCaptureIdea(
+    {
+      chatId,
+      text,
+      from,
+      actor,
+      inputSource,
+    },
+    {}
+  );
+  if (ideaCaptured.handled) return;
 }
 
 // Память — сохраняется только если ничего выше не сработало, то есть
@@ -870,7 +730,11 @@ if (!aiOwnership.executedActions.length && !isUnparsedFinanceAttempt && shouldSa
   });
 
   if (saved) {
-    await bot.sendMessage(chatId, "🧠 Запомнил.");
+    await bot.sendMessage(
+      chatId,
+      `${THIN_CONFIRM.memory}\n\n${THIN_CONFIRM.openMemory}`,
+      withMiniAppOpenButton({}, MINI_APP_PATHS.memory, THIN_CONFIRM.openMemory)
+    );
     return;
   }
 }
@@ -882,9 +746,9 @@ if (aiOwnership.executedActions.length > 0) {
   return;
 }
 
-// Если команда не распознана — показываем главное меню вместо старого
-// длинного списка команд (доступен по кнопке "❓ Помощь", см.
-// handlers/routes/menuRoute.js#sendHelp).
+// Если команда не распознана — показываем короткое меню вместо старого
+// длинного списка команд (онбординг доступен по кнопке "❓ Как пользоваться",
+// см. handlers/routes/menuRoute.js#sendHelp).
 await sendFallback(chatId);
 
 }

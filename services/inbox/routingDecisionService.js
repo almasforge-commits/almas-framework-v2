@@ -240,9 +240,13 @@ export async function decideRouting(rawText, context = {}) {
         mode,
         chatId,
         userId: from?.id ?? null,
+        actorKey:
+          context.actor?.actorKey ||
+          (from?.id != null ? `telegram:${from.id}` : null),
         username: from?.username ?? null,
         firstName: from?.first_name ?? null,
         requestKey,
+        inputSource,
       },
       executorDeps
     );
@@ -290,7 +294,7 @@ export async function decideRouting(rawText, context = {}) {
 // (see actionExecutor.js's EXECUTABLE_ACTION_TYPES) — kept as its own
 // small local constant so ownership derivation never silently grows to
 // cover a type actionExecutor.js doesn't actually execute.
-const OWNABLE_ACTION_TYPES = ["task_create", "memory_save"];
+const OWNABLE_ACTION_TYPES = ["task_create", "memory_save", "idea_create"];
 
 /**
  * Derives "AI ownership" from a decision returned by decideRouting():

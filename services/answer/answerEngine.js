@@ -81,6 +81,7 @@ export function createAnswerEngine(deps = {}) {
         getTasksSnapshot: deps.getTasksSnapshot,
         searchKnowledgeFn: deps.searchKnowledgeFn,
         searchMemoryFn: deps.searchMemoryFn,
+        searchIdeasFn: deps.searchIdeasFn,
       },
       config
     );

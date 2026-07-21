@@ -71,7 +71,8 @@ function run() {
       '"Привет"',
       "VOICE_BLOCKED_TEXT_COMMANDS.includes(normalizedText)",
       '"спроси "',
-      '"мои знания"',
+      "isKnowledgeListCommand(text)",
+      "isKnowledgeOpenCommand(text)",
       '"найди "',
       '"вспомни "',
       '"мои задачи"',
@@ -170,63 +171,44 @@ function run() {
     assert.match(routeTextBody, /await sendFallback\(chatId\);/);
   });
 
-  test("the detailed help text moved to menuRoute.js's sendHelp, byte-for-byte, reachable only via \"❓ Помощь\"", () => {
-    const helpText = `Пока я умею:
-
-👋 Привет
-
-💸 Финансы
-• расход 100 кофе
-• доход 5000 зарплата
-• баланс
-• история
-• статистика
-• расходы за сегодня
-• расходы за неделю
-• расходы за месяц
-
-📚 Знания
-• мои знания
-• открыть 1
-• спроси ...
-• найди ...
-
-🧠 Память
-• вспомни ...
-
-📋 Задачи
-• мои задачи
-• выполнено 1
-• выполненные задачи
-
-🎥 Анализ YouTube
-
-🗑 Удалить все знания`;
-
-    assert.ok(
-      menuRouteSource.includes(helpText),
-      "Detailed help text is missing (or changed) in menuRoute.js's sendHelp"
-    );
+  test("sendHelp shows concise onboarding, reachable via \"❓ Как пользоваться\" / \"❓ Помощь\"", () => {
+    assert.match(menuRouteSource, /Как пользоваться ALMAS/);
+    assert.match(menuRouteSource, /Потратил 80 000 VND на кофе/);
+    assert.match(menuRouteSource, /У меня идея/);
+    assert.match(menuRouteSource, /Запомни, что мне нравится работать ночью/);
+    assert.match(menuRouteSource, /одним сообщением/);
+    assert.doesNotMatch(menuRouteSource, /Пока я умею:/);
+    assert.match(routeTextBody, /"❓ как пользоваться"/);
+    assert.match(routeTextBody, /"❓ помощь"/);
   });
 
   test("routeText dispatches the navigation menu BEFORE any AI routing call (and before Finance/Memory/Task/Knowledge)", () => {
     const expectedMenuKeys = [
-      '"меню": () => sendMainMenu(chatId)',
-      '"/start": () => sendMainMenu(chatId)',
-      '"🏠 главная": () => sendMainMenu(chatId)',
-      '"📚 знания": () => sendKnowledgeMenu(chatId)',
-      '"💡 идеи": () => sendIdeasPlaceholder(chatId)',
-      '"📋 задачи": () => sendTasksMenu(chatId)',
-      '"🚀 проекты": () => sendProjectsPlaceholder(chatId)',
-      '"💰 финансы": () => sendFinanceMenu(chatId, String(from.id))',
-      '"🧠 память": () => sendMemoryMenu(chatId)',
-      '"🌐 открыть almas": () => sendOpenAlmas(chatId)',
-      '"❓ помощь": () => sendHelp(chatId)',
+      '"меню":',
+      '"/start":',
+      '"🏠 главная":',
+      '"📚 знания":',
+      "sendIdeasMenu(chatId",
+      '"📋 задачи":',
+      '"🚀 проекты":',
+      '"💰 финансы":',
+      "sendMemoryMenu(chatId",
+      '"🌐 открыть almas":',
+      '"❓ помощь":',
+      "sendMainMenu(chatId",
+      "sendKnowledgeMenu(chatId",
+      "sendTasksMenu(chatId",
+      "sendFinanceMenu(chatId",
     ];
 
     for (const fragment of expectedMenuKeys) {
       assert.ok(routeTextBody.includes(fragment), `Expected menu dispatch to include: ${fragment}`);
     }
+
+    assert.ok(
+      routeTextBody.includes("actorKey: menuActor?.actorKey"),
+      "Ideas/Memory menu must pass actorKey"
+    );
 
     const menuIndex = routeTextBody.indexOf("const menuHandler = {");
     const aiActiveIndex = routeTextBody.indexOf("if (isAiRouterExecutionActive()) {");
@@ -242,7 +224,7 @@ function run() {
   test("messageHandler.js imports every menu route function it dispatches to from ./routes/menuRoute.js", () => {
     assert.match(
       source,
-      /import \{\s*sendMainMenu,\s*sendFallback,\s*sendKnowledgeMenu,\s*sendTasksMenu,\s*sendFinanceMenu,\s*sendMemoryMenu,\s*sendIdeasPlaceholder,\s*sendProjectsPlaceholder,\s*sendOpenAlmas,\s*sendHelp,\s*\} from "\.\/routes\/menuRoute\.js";/
+      /import \{\s*sendMainMenu,\s*sendFallback,\s*sendKnowledgeMenu,\s*sendTasksMenu,\s*sendFinanceMenu,\s*sendMemoryMenu,\s*sendIdeasMenu,\s*sendIdeasPlaceholder,\s*sendProjectsPlaceholder,\s*sendOpenAlmas,\s*sendHelp,\s*\} from "\.\/routes\/menuRoute\.js";/
     );
   });
 
@@ -323,7 +305,7 @@ function run() {
     assert.match(routeTextBody, /mapInputSourceToInboxSourceType\(inputSource\)/);
 
     const menuIndex = routeTextBody.indexOf("const menuHandler = {");
-    const meaninglessIndex = routeTextBody.indexOf("if (isMeaninglessShortInput(text))");
+    const meaninglessIndex = routeTextBody.indexOf("isMeaninglessShortInput(text)");
     const inboxIndex = routeTextBody.indexOf("startInboxReceivedObservation({");
     const aiActiveIndex = routeTextBody.indexOf("if (isAiRouterExecutionActive()) {");
     const observeIndex = routeTextBody.indexOf("observeMessage(text, routingContext)");
@@ -342,11 +324,11 @@ function run() {
     assert.match(routeTextBody, /if \(isAiRouterExecutionActive\(\)\) \{/);
     assert.match(
       routeTextBody,
-      /const decision = await decideRouting\(text, routingContext\);/
+      /aiDecision = await decideRouting\(text, routingContext\);/
     );
     assert.match(
       routeTextBody,
-      /aiOwnership = getExecutedOwnedActions\(decision\);/
+      /aiOwnership = getExecutedOwnedActions\(aiDecision\);/
     );
 
     const hookLine = routeTextBody
@@ -407,23 +389,19 @@ function run() {
   });
 
   test("meaningless short input is handled before AI routing and sends the menu fallback", () => {
-    const shortIndex = routeTextBody.indexOf("if (isMeaninglessShortInput(text))");
+    const shortIndex = routeTextBody.indexOf("isMeaninglessShortInput(text)");
     const aiIndex = routeTextBody.indexOf("if (isAiRouterExecutionActive())");
     assert.ok(shortIndex !== -1 && shortIndex < aiIndex);
     assert.match(source, /import \{ isMeaninglessShortInput \} from "\.\.\/core\/utils\/isMeaninglessShortInput\.js";/);
+    assert.match(routeTextBody, /maybeHandleCaptureSessionCreate/);
+    assert.match(routeTextBody, /maybeHandleCaptureSessionTurn/);
   });
 
-  test("the finance success message templates are byte-identical to the pre-extraction originals", () => {
-    assert.ok(
-      source.includes(
-        '`💸 Расход сохранён\n    \n    Сумма: ${finance.amount.toLocaleString()} ${finance.currency}\n    Описание: ${finance.description || "Без описания"}`'
-      )
-    );
-    assert.ok(
-      source.includes(
-        '`💰 Доход сохранён\n    \n    Сумма: ${finance.amount.toLocaleString()} ${finance.currency}\n    Описание: ${finance.description || "Без описания"}`'
-      )
-    );
+  test("finance success messages are thin confirmations with Mini App deep link", () => {
+    assert.match(source, /THIN_CONFIRM\.finance/);
+    assert.match(source, /MINI_APP_PATHS\.finance/);
+    assert.ok(!source.includes("💸 Расход сохранён"));
+    assert.ok(!source.includes("💰 Доход сохранён"));
   });
 
   if (process.exitCode) {

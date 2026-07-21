@@ -30,8 +30,12 @@ function fakeDeps(overrides = {}) {
 }
 
 async function run() {
-  await test("EXECUTABLE_ACTION_TYPES is exactly task_create and memory_save", () => {
-    assert.deepEqual(EXECUTABLE_ACTION_TYPES, ["task_create", "memory_save"]);
+  await test("EXECUTABLE_ACTION_TYPES includes task_create, memory_save, idea_create", () => {
+    assert.deepEqual(EXECUTABLE_ACTION_TYPES, [
+      "task_create",
+      "memory_save",
+      "idea_create",
+    ]);
   });
 
   await test("shadow mode (mode !== 'active') never executes anything, regardless of type", async () => {

@@ -7,6 +7,12 @@ import { createInboxRouter } from "./routes/inbox.js";
 import { createFinanceRouter } from "./routes/finance.js";
 import { createTasksRouter } from "./routes/tasks.js";
 import { createKnowledgeRouter } from "./routes/knowledge.js";
+import { createIdeasRouter } from "./routes/ideas.js";
+import { createIdeasReader } from "./readers/ideasReader.js";
+import { createCaptureRouter } from "./routes/capture.js";
+import { createCaptureReader } from "./readers/captureReader.js";
+import { createMemoryRouter } from "./routes/memory.js";
+import { createMemoryReader } from "./readers/memoryReader.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -46,7 +52,10 @@ export function createApp(deps) {
         "Access-Control-Allow-Headers",
         "Authorization, Content-Type"
       );
-      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+      res.setHeader(
+        "Access-Control-Allow-Methods",
+        "GET, POST, PATCH, OPTIONS"
+      );
     }
     if (req.method === "OPTIONS") {
       return res.status(204).end();
@@ -85,6 +94,11 @@ export function createApp(deps) {
     financeReader: deps.financeReader,
     tasksReader: deps.tasksReader,
     knowledgeReader: deps.knowledgeReader,
+    ideasReader: deps.ideasReader ?? createIdeasReader({}),
+    captureReader: deps.captureReader ?? createCaptureReader({}),
+    memoryReader: deps.memoryReader ?? createMemoryReader({}),
+    captureStore: deps.captureStore,
+    captureExecutorDeps: deps.captureExecutorDeps,
   };
 
   app.use("/api/dashboard", auth, createDashboardRouter(routeDeps));
@@ -92,6 +106,9 @@ export function createApp(deps) {
   app.use("/api/finance", auth, createFinanceRouter(routeDeps));
   app.use("/api/tasks", auth, createTasksRouter(routeDeps));
   app.use("/api/knowledge", auth, createKnowledgeRouter(routeDeps));
+  app.use("/api/ideas", auth, createIdeasRouter(routeDeps));
+  app.use("/api/capture", auth, createCaptureRouter(routeDeps));
+  app.use("/api/memory", auth, createMemoryRouter(routeDeps));
 
   app.use((req, res) => {
     sendError(

@@ -248,7 +248,8 @@ await test("11-13) recall queries answer from non-conflicting memories", async (
       }
     );
     assert.equal(r.handled, true);
-    const body = sent.join("\n");
+    assert.match(sent.join("\n"), /Found|Open in ALMAS/i);
+    const body = String(r.result?.answer || "");
     assert.ok(
       !/Недостаточно надёжных данных/i.test(body),
       `unexpected clarification for: ${text} → ${body}`

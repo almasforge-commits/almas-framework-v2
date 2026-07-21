@@ -32,11 +32,12 @@ const FORBIDDEN_IMPORT_PATTERNS = [
   /node-telegram-bot-api/,
 ];
 
-// Still must not be modified by Inbox wiring (voice derives sourceType in routeText).
+// Still must not be modified casually by Inbox-only wiring
+// (voice derives sourceType in routeText). actionExecutor is allowed to
+// evolve with domain executors (e.g. idea_create).
 const FORBIDDEN_LIVE_FILES = [
   "handlers/routes/voiceRoute.js",
   "handlers/routes/youtubeRoute.js",
-  "services/inbox/actionExecutor.js",
 ];
 
 function test(name, fn) {

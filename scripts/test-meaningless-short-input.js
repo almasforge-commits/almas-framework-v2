@@ -142,8 +142,8 @@ async function run() {
     assert.doesNotMatch(source, /console\.log\(\s*embedding\s*\)/);
     assert.doesNotMatch(source, /console\.log\([^;]*,\s*embedding\s*\)/);
     assert.match(source, /dims=\$\{embedding \? embedding\.length/);
-    assert.match(source, /\[memory\] action=search matches=/);
-    assert.match(source, /const matchCount = /);
+    assert.match(source, /\[memory\] action=search queryChars=/);
+    assert.match(source, /rawMatchCount/);
   });
 
   await test("messageHandler short-input fast path runs before AI routing", () => {
@@ -151,10 +151,12 @@ async function run() {
       path.join(__dirname, "..", "handlers", "messageHandler.js"),
       "utf8"
     );
-    const shortIndex = source.indexOf("if (isMeaninglessShortInput(text))");
+    const shortIndex = source.indexOf("isMeaninglessShortInput(text)");
     const aiIndex = source.indexOf("if (isAiRouterExecutionActive())");
     assert.ok(shortIndex !== -1 && shortIndex < aiIndex);
     assert.match(source, /await sendFallback\(chatId\);/);
+    // Bare numbers may defer when navigation context is active.
+    assert.match(source, /shouldDeferMeaninglessForNav/);
   });
 
   if (process.exitCode) {

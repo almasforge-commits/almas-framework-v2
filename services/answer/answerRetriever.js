@@ -198,7 +198,7 @@ export async function retrieveAnswerEvidence(plan, deps = {}, config = {}) {
     const wanted = new Set(
       Array.isArray(plan.domains) && plan.domains.length
         ? plan.domains
-        : ["finance", "tasks", "knowledge", "memory"]
+        : ["finance", "tasks", "knowledge", "memory", "ideas"]
     );
 
     if (wanted.has("finance") && typeof deps.getFinanceSnapshot === "function") {
@@ -271,6 +271,19 @@ export async function retrieveAnswerEvidence(plan, deps = {}, config = {}) {
         if (items.length) {
           evidence.push(...items);
           flags.usedDomains.push("memory");
+        }
+      } catch {
+        // swallow
+      }
+    }
+
+    if (wanted.has("ideas") && typeof deps.searchIdeasFn === "function") {
+      try {
+        const snap = await deps.searchIdeasFn(query, { actorKey });
+        const items = collectDomainEvidence("ideas", snap).slice(0, limitDomain);
+        if (items.length) {
+          evidence.push(...items);
+          flags.usedDomains.push("ideas");
         }
       } catch {
         // swallow

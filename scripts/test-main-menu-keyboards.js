@@ -10,11 +10,11 @@ import {
   buildTasksMenuKeyboard,
   buildFinanceMenuKeyboard,
   buildMemoryMenuKeyboard,
+  buildIdeasMenuKeyboard,
+  attachPersistentMainKeyboard,
   MENU_BUTTON_LABELS,
 } from "../handlers/keyboards/mainMenu.js";
 import { isValidWebAppUrl } from "../config/webapp.js";
-
-// Pure keyboard builders — no bot/Telegram/network/filesystem access.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,29 +34,24 @@ function flatten(keyboard) {
 }
 
 function run() {
-  test("buildMainMenuKeyboard() returns the exact 2x4 grid of required buttons, in order", () => {
+  test("buildMainMenuKeyboard() is exactly Open ALMAS + Как пользоваться", () => {
     const { reply_markup } = buildMainMenuKeyboard();
     assert.deepEqual(flatten(reply_markup.keyboard), [
+      MENU_BUTTON_LABELS.openAlmas,
+      MENU_BUTTON_LABELS.help,
+    ]);
+    assert.equal(MENU_BUTTON_LABELS.help, "❓ Как пользоваться");
+    assert.equal(MENU_BUTTON_LABELS.helpLegacy, "❓ Помощь");
+    for (const domain of [
       MENU_BUTTON_LABELS.knowledge,
       MENU_BUTTON_LABELS.ideas,
       MENU_BUTTON_LABELS.tasks,
       MENU_BUTTON_LABELS.projects,
       MENU_BUTTON_LABELS.finance,
       MENU_BUTTON_LABELS.memory,
-      MENU_BUTTON_LABELS.openAlmas,
-      MENU_BUTTON_LABELS.help,
-    ]);
-    assert.deepEqual(MENU_BUTTON_LABELS, {
-      knowledge: "📚 Знания",
-      ideas: "💡 Идеи",
-      tasks: "📋 Задачи",
-      projects: "🚀 Проекты",
-      finance: "💰 Финансы",
-      memory: "🧠 Память",
-      openAlmas: "🌐 Открыть ALMAS",
-      help: "❓ Помощь",
-      home: "🏠 Главная",
-    });
+    ]) {
+      assert.ok(!flatten(reply_markup.keyboard).includes(domain));
+    }
   });
 
   test("buildMainMenuKeyboard() is persistent and resizable", () => {
@@ -65,51 +60,65 @@ function run() {
     assert.equal(reply_markup.is_persistent, true);
   });
 
-  test("buildMainMenuKeyboard(): with ALMAS_WEB_APP_URL unset (this repo's real, untouched .env), the Open-ALMAS button is a plain text button, not web_app", () => {
+  test("buildMainMenuKeyboard(): with ALMAS_WEB_APP_URL unset, Open-ALMAS is plain text", () => {
     const { reply_markup } = buildMainMenuKeyboard();
-    const button = reply_markup.keyboard[3][0];
+    const button = reply_markup.keyboard[0][0];
     assert.equal(button.text, MENU_BUTTON_LABELS.openAlmas);
     assert.equal(button.web_app, undefined);
   });
 
+  test("attachPersistentMainKeyboard skips inline / existing keyboard", () => {
+    assert.ok(attachPersistentMainKeyboard({}).reply_markup.keyboard);
+    const inline = attachPersistentMainKeyboard({
+      reply_markup: { inline_keyboard: [[{ text: "a", callback_data: "b" }]] },
+    });
+    assert.ok(inline.reply_markup.inline_keyboard);
+    assert.equal(inline.reply_markup.keyboard, undefined);
+  });
+
   test("buildHomeOnlyKeyboard() returns a single inline 'Главная' button with callback_data menu:home", () => {
     const { reply_markup } = buildHomeOnlyKeyboard();
-    assert.deepEqual(reply_markup.inline_keyboard, [
-      [{ text: "🏠 Главная", callback_data: "menu:home" }],
-    ]);
+    const flat = reply_markup.inline_keyboard.flat();
+    assert.ok(flat.some((b) => b.callback_data === "menu:home"));
   });
 
-  test("buildKnowledgeMenuKeyboard() has 'Все знания', 'Поиск', and 'Главная' with the expected callback_data", () => {
+  test("buildKnowledgeMenuKeyboard() is Mini App open only (lists live in app)", () => {
     const { reply_markup } = buildKnowledgeMenuKeyboard();
     const buttons = reply_markup.inline_keyboard.flat();
-    assert.deepEqual(
-      buttons.map((b) => b.callback_data),
-      ["menu:knowledge:all", "menu:knowledge:search", "menu:home"]
-    );
+    assert.ok(!buttons.some((b) => String(b.callback_data || "").startsWith("menu:knowledge:")));
   });
 
-  test("buildTasksMenuKeyboard() has 'Выполненные' and 'Главная'", () => {
+  test("buildTasksMenuKeyboard() is Mini App open only", () => {
     const { reply_markup } = buildTasksMenuKeyboard();
     const buttons = reply_markup.inline_keyboard.flat();
-    assert.deepEqual(buttons.map((b) => b.callback_data), ["menu:tasks:done", "menu:home"]);
+    assert.ok(!buttons.some((b) => b.callback_data === "menu:tasks:done"));
   });
 
-  test("buildFinanceMenuKeyboard() has 'История', 'Статистика', and 'Главная'", () => {
+  test("buildFinanceMenuKeyboard() is Mini App open only", () => {
     const { reply_markup } = buildFinanceMenuKeyboard();
     const buttons = reply_markup.inline_keyboard.flat();
-    assert.deepEqual(
-      buttons.map((b) => b.callback_data),
-      ["menu:finance:history", "menu:finance:stats", "menu:home"]
-    );
+    assert.ok(!buttons.some((b) => String(b.callback_data || "").startsWith("menu:finance:")));
   });
 
-  test("buildMemoryMenuKeyboard() has 'Вспомнить', 'Поиск', and 'Главная'", () => {
+  test("buildMemoryMenuKeyboard() keeps chat save shortcut; lists live in Mini App", () => {
     const { reply_markup } = buildMemoryMenuKeyboard();
-    const buttons = reply_markup.inline_keyboard.flat();
-    assert.deepEqual(
-      buttons.map((b) => b.callback_data),
-      ["menu:memory:recall", "menu:memory:search", "menu:home"]
-    );
+    const callbacks = reply_markup.inline_keyboard
+      .flat()
+      .map((b) => b.callback_data)
+      .filter(Boolean);
+    assert.deepEqual(callbacks, ["menu:memory:save"]);
+  });
+
+  test("buildIdeasMenuKeyboard() keeps chat capture shortcuts; lists live in Mini App", () => {
+    const { reply_markup } = buildIdeasMenuKeyboard();
+    const callbacks = reply_markup.inline_keyboard
+      .flat()
+      .map((b) => b.callback_data)
+      .filter(Boolean);
+    assert.ok(callbacks.includes("menu:ideas:new"));
+    assert.ok(callbacks.includes("menu:ideas:cat:content"));
+    assert.ok(!callbacks.includes("menu:ideas:search"));
+    assert.ok(!callbacks.includes("menu:home"));
   });
 
   test("isValidWebAppUrl(): only accepts https:// URLs", () => {
@@ -122,17 +131,11 @@ function run() {
     assert.equal(isValidWebAppUrl(undefined), false);
   });
 
-  // Env-driven behavior is verified end-to-end in a genuinely separate
-  // process (not via cache-busted dynamic import) because
-  // handlers/keyboards/mainMenu.js statically imports config/webapp.js,
-  // and Node's ESM module cache is keyed by the *resolved* specifier of
-  // that static import — busting the cache of the importer alone does not
-  // re-evaluate its own statically-imported dependencies.
   function readWebAppButtonInChildProcess(env) {
     const script = `
       import { buildMainMenuKeyboard } from "../handlers/keyboards/mainMenu.js";
       const { reply_markup } = buildMainMenuKeyboard();
-      process.stdout.write(JSON.stringify(reply_markup.keyboard[3][0]));
+      process.stdout.write(JSON.stringify(reply_markup.keyboard[0][0]));
     `;
     const output = execFileSync(
       process.execPath,

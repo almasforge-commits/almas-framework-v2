@@ -98,6 +98,55 @@ export interface KnowledgeItem {
   createdAt: string;
 }
 
+export interface MemoryItem {
+  id: string | null;
+  content: string;
+  createdAt: string | null;
+  type: string | null;
+}
+
+export interface CaptureAction {
+  type: string;
+  confidence?: number;
+  payload?: Record<string, unknown>;
+  requiresConfirmation?: boolean;
+  index?: number;
+  content?: string;
+}
+
+export interface CaptureSessionDetail {
+  sessionId: string | null;
+  status: string | null;
+  source: string | null;
+  originalText: string;
+  counts: {
+    expenses: number;
+    income: number;
+    ideas: number;
+    tasks: number;
+    memory: number;
+    knowledge: number;
+    total: number;
+  };
+  actions: CaptureAction[];
+  groups: {
+    expenses: CaptureAction[];
+    income: CaptureAction[];
+    ideas: CaptureAction[];
+    tasks: CaptureAction[];
+    memory: CaptureAction[];
+    knowledge: CaptureAction[];
+  };
+  expiresAt: number | null;
+  createdAt: number | null;
+}
+
+export interface CaptureConfirmResult {
+  confirmed: boolean;
+  reason: string;
+  executedCount: number;
+}
+
 export interface HomePayload {
   summary: DashboardSummary;
   todayActivity: ActivityItem[];
@@ -114,6 +163,14 @@ export interface AlmasApiClient {
   getTasks(): Promise<Task[]>;
   patchTask(id: string, patch: { completed: boolean }): Promise<Task | null>;
   getKnowledge(): Promise<KnowledgeItem[]>;
+  getMemory(): Promise<MemoryItem[]>;
+  getCaptureSession(sessionId: string): Promise<CaptureSessionDetail>;
+  patchCaptureSession(
+    sessionId: string,
+    body: { actions: CaptureAction[] }
+  ): Promise<CaptureSessionDetail>;
+  confirmCaptureSession(sessionId: string): Promise<CaptureConfirmResult>;
+  cancelCaptureSession(sessionId: string): Promise<{ cancelled: boolean }>;
 }
 
 export type { TelegramUser };

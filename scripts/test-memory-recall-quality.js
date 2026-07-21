@@ -176,7 +176,7 @@ await test("7) about-me query returns preferences (not tasks)", async () => {
     searchKnowledgeFn: async () => [{ id: "k1", title: "WHOOP" }],
   });
   const sent = [];
-  await maybeHandleAnswerQuestion(
+  const r = await maybeHandleAnswerQuestion(
     {
       chatId: 1,
       text: "Что ты знаешь обо мне?",
@@ -185,7 +185,8 @@ await test("7) about-me query returns preferences (not tasks)", async () => {
     },
     { answerEngine: engine, sendMessageFn: async (_c, t) => sent.push(t) }
   );
-  const body = sent.join("\n");
+  assert.match(sent.join("\n"), /Found|Open in ALMAS/i);
+  const body = String(r.result?.answer || "");
   assert.match(body, /ночью/i);
   assert.ok(!/Купить молоко/i.test(body));
   assert.ok(!/WHOOP/i.test(body));
@@ -284,7 +285,7 @@ await test("preference recall via answer path has no duplicates", async () => {
     searchKnowledgeFn: async () => [],
   });
   const sent = [];
-  await maybeHandleAnswerQuestion(
+  const r = await maybeHandleAnswerQuestion(
     {
       chatId: 1,
       text: "вспомни что мне нравится",
@@ -293,7 +294,8 @@ await test("preference recall via answer path has no duplicates", async () => {
     },
     { answerEngine: engine, sendMessageFn: async (_c, t) => sent.push(t) }
   );
-  const body = sent.join("\n");
+  assert.match(sent.join("\n"), /Found|Open in ALMAS/i);
+  const body = String(r.result?.answer || "");
   assert.ok(!/Недостаточно надёжных данных/i.test(body));
   const matches = body.match(/нравится работать ночью/gi) || [];
   assert.equal(matches.length, 1, `expected one fact line, got: ${body}`);
@@ -375,7 +377,7 @@ await test("about-me never returns navigation/system memories", async () => {
     searchKnowledgeFn: async () => [],
   });
   const sent = [];
-  await maybeHandleAnswerQuestion(
+  const r = await maybeHandleAnswerQuestion(
     {
       chatId: 1,
       text: "What do you know about me?",
@@ -384,7 +386,8 @@ await test("about-me never returns navigation/system memories", async () => {
     },
     { answerEngine: engine, sendMessageFn: async (_c, t) => sent.push(t) }
   );
-  const body = sent.join("\n");
+  assert.match(sent.join("\n"), /Found|Open in ALMAS/i);
+  const body = String(r.result?.answer || "");
   assert.match(body, /ночью/i);
   assert.match(body, /кофе/i);
   assert.ok(!/Мои задачи/i.test(body));

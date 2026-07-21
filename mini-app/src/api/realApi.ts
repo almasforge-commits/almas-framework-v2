@@ -1,15 +1,19 @@
 import type { AlmasApiClient } from "./apiTypes";
 import type {
+  CaptureAction,
+  CaptureConfirmResult,
+  CaptureSessionDetail,
   FinancePeriod,
   FinanceSummary,
   FinanceTransaction,
   HomePayload,
   InboxItem,
   KnowledgeItem,
+  MemoryItem,
   Task,
 } from "./apiTypes";
 import { ApiError } from "./apiErrors";
-import { liveGetJson, type LiveHttpDeps } from "./liveHttp";
+import { liveGetJson, liveSendJson, type LiveHttpDeps } from "./liveHttp";
 import { getApiBaseUrl } from "../config/env";
 
 function assertArray<T>(value: unknown, label: string): T[] {
@@ -22,7 +26,7 @@ function assertArray<T>(value: unknown, label: string): T[] {
 }
 
 /**
- * Live read-only API client. No PATCH/POST/writes.
+ * Live API client. Capture review supports PATCH/POST; other domains stay GET.
  */
 export function createRealApi(deps: Partial<LiveHttpDeps> = {}): AlmasApiClient {
   const httpDeps: LiveHttpDeps = {
@@ -63,7 +67,6 @@ export function createRealApi(deps: Partial<LiveHttpDeps> = {}): AlmasApiClient 
       return assertArray<Task>(data, "tasks");
     },
 
-    /** Local-only no-op — live API is read-only (no PATCH). */
     async patchTask(): Promise<Task | null> {
       return null;
     },
@@ -74,6 +77,52 @@ export function createRealApi(deps: Partial<LiveHttpDeps> = {}): AlmasApiClient 
         httpDeps
       );
       return assertArray<KnowledgeItem>(data, "knowledge");
+    },
+
+    async getMemory(): Promise<MemoryItem[]> {
+      const data = await liveGetJson<MemoryItem[]>("/api/memory", httpDeps);
+      return assertArray<MemoryItem>(data, "memory");
+    },
+
+    async getCaptureSession(sessionId: string): Promise<CaptureSessionDetail> {
+      return liveGetJson<CaptureSessionDetail>(
+        `/api/capture/${encodeURIComponent(sessionId)}`,
+        httpDeps
+      );
+    },
+
+    async patchCaptureSession(
+      sessionId: string,
+      body: { actions: CaptureAction[] }
+    ): Promise<CaptureSessionDetail> {
+      return liveSendJson<CaptureSessionDetail>(
+        `/api/capture/${encodeURIComponent(sessionId)}`,
+        "PATCH",
+        body,
+        httpDeps
+      );
+    },
+
+    async confirmCaptureSession(
+      sessionId: string
+    ): Promise<CaptureConfirmResult> {
+      return liveSendJson<CaptureConfirmResult>(
+        `/api/capture/${encodeURIComponent(sessionId)}/confirm`,
+        "POST",
+        {},
+        httpDeps
+      );
+    },
+
+    async cancelCaptureSession(
+      sessionId: string
+    ): Promise<{ cancelled: boolean }> {
+      return liveSendJson<{ cancelled: boolean }>(
+        `/api/capture/${encodeURIComponent(sessionId)}/cancel`,
+        "POST",
+        {},
+        httpDeps
+      );
     },
   };
 }

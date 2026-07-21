@@ -63,7 +63,7 @@ function run() {
     assert.ok(getExecutableDomains().every((d) => d.executable));
     assert.deepEqual(
       getExecutableDomains().map((d) => d.id).sort(),
-      ["memory", "task"]
+      ["idea", "memory", "task"]
     );
   });
 

@@ -4,6 +4,9 @@ import { parseFinanceQuery } from "../finance/financeQueryParser.js";
 import { normalizeCommandText } from "../../core/utils/normalizeUserText.js";
 import { isMenuNavigationCommand } from "../../core/utils/menuNavigationCommands.js";
 import { isMeaninglessShortInput } from "../../core/utils/isMeaninglessShortInput.js";
+import { isStrongIdeaCapture } from "../ideas/ideaDetector.js";
+import { isIdeasRetrievalQuery } from "../ideas/ideaQueryIntent.js";
+import { isNavigationOrDomainOpenCommand } from "../navigation/navigationResolver.js";
 
 // Mirrors handlers/messageHandler.js's VOICE_BLOCKED_TEXT_COMMANDS. Kept
 // as its own small local list (rather than a cross-file import) so this
@@ -128,6 +131,13 @@ export function shouldSaveMemory(text) {
   // Explicit bare remember → clarification asks; do not auto-save the verb.
   const memoryCmd = extractLegacyMemorySaveContent(text);
   if (memoryCmd.kind === "incomplete") return false;
+
+  // Strong idea captures go to Ideas, not Memory (text + voice).
+  if (isStrongIdeaCapture(text)) return false;
+  if (isIdeasRetrievalQuery(text)) return false;
+
+  // Navigation follow-ups + exact domain opens never become Memory.
+  if (isNavigationOrDomainOpenCommand(text)) return false;
 
   // Finance: any recognized query intent (balance/history/statistics/
   // analytics/delete_last) or any expense/income trigger word — even if

@@ -99,7 +99,7 @@ async function run() {
     );
     assert.equal(done.reason, "completed");
     assert.equal(counters.execCalls(), 1);
-    assert.ok(sent.some((m) => /Задача сохранена/i.test(m.text)));
+    assert.ok(sent.some((m) => /Task saved/i.test(m.text)));
   });
 
   await test("memory missing content → question; answer executes once", async () => {
@@ -165,7 +165,7 @@ async function run() {
     assert.equal(done.reason, "completed");
     assert.equal(counters.expenseCalls(), 1);
     assert.equal(counters.execCalls(), 0);
-    assert.ok(sent.some((m) => /Расход сохранён/i.test(m.text)));
+    assert.ok(sent.some((m) => /Updated/i.test(m.text)));
   });
 
   await test("finance works in shadow mode", async () => {

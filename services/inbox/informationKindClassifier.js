@@ -12,6 +12,7 @@ const ACTION_TO_KIND = Object.freeze({
   finance_income: "finance",
   task_create: "task",
   memory_save: "memory",
+  idea_create: "idea",
   knowledge_query: "knowledge",
   search: "search",
   chat: "chat",

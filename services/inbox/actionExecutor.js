@@ -1,36 +1,17 @@
 import { saveMemory } from "../storage/memoryService.js";
 import { classifyMemory } from "../storage/memoryClassifier.js";
+import { captureIdea } from "../ideas/ideaCapture.js";
 
 // The ONLY module in the AI router pipeline allowed to import a domain-
-// executing service. providers/ai/*, aiIntentAnalyzer.js, actionPlanner.js,
-// actionValidator.js, deterministicIntentDetector.js, and
-// routingDecisionService.js must never import Finance/Memory/Tasks/
-// Knowledge directly — everything flows through this boundary instead,
-// and only after actionValidator.js has already approved an action.
-//
-// Currently whitelisted for real execution: task_create, memory_save.
-// Both persist through the same saveMemory() call — Tasks still live
-// inside the `memories` table (see DATA_MODEL.md / D-003), so
-// task_create sets memoryType: "task" directly instead of re-deriving
-// it via memoryClassifier's keyword heuristics: the AI already decided
-// this is a task, ALMAS trusts that classification rather than
-// re-guessing from keywords.
-//
-// Finance, system_command (including every destructive command),
-// knowledge_query, search, chat, and unknown are never executed here —
-// deterministic Finance parsing remains the sole authority for money
-// movement, and every other type is explicitly out of scope for this
-// milestone (see PROJECT_STATE.md).
+// executing service. Whitelisted: task_create, memory_save, idea_create.
+// Tasks/memories share `memories`; Ideas persist in dedicated `ideas`.
 
-export const EXECUTABLE_ACTION_TYPES = ["task_create", "memory_save"];
+export const EXECUTABLE_ACTION_TYPES = [
+  "task_create",
+  "memory_save",
+  "idea_create",
+];
 
-// Cross-call idempotency: guards against the SAME Telegram message being
-// executed twice (e.g. a retried/duplicated update), on top of the
-// within-one-call `seenSignatures` dedup below (which only protects
-// against the AI planning the identical action more than once in a
-// single response). Keyed by context.requestKey (see
-// core/utils/buildRequestKey.js) — in-memory only, so a process restart
-// resets it; bounded so a long-running process can't leak memory.
 const MAX_IDEMPOTENCY_KEYS = 500;
 const executedSignaturesByRequestKey = new Map();
 
@@ -77,9 +58,11 @@ async function runTaskCreate(action, context, deps) {
   const content = action.payload?.content;
 
   if (!content) {
-    // Precise reason: validator already folded title/text → content, so
-    // reaching here means every supported alias was genuinely empty.
-    return { executed: false, reason: "skipped_missing_task_content", type: "task_create" };
+    return {
+      executed: false,
+      reason: "skipped_missing_task_content",
+      type: "task_create",
+    };
   }
 
   const ok = await deps.saveMemoryFn({
@@ -109,7 +92,11 @@ async function runMemorySave(action, context, deps) {
   const content = action.payload?.content;
 
   if (!content) {
-    return { executed: false, reason: "skipped_missing_memory_content", type: "memory_save" };
+    return {
+      executed: false,
+      reason: "skipped_missing_memory_content",
+      type: "memory_save",
+    };
   }
 
   const classified = deps.classifyMemoryFn(content);
@@ -137,31 +124,74 @@ async function runMemorySave(action, context, deps) {
     : { executed: false, reason: "domain_error", type: "memory_save" };
 }
 
+async function runIdeaCreate(action, context, deps) {
+  const content = action.payload?.content;
+  if (!content) {
+    return {
+      executed: false,
+      reason: "skipped_missing_idea_content",
+      type: "idea_create",
+    };
+  }
+
+  const userId = context.userId;
+  const actorKey =
+    context.actorKey ||
+    (userId != null ? `telegram:${userId}` : null);
+
+  if (!actorKey) {
+    return {
+      executed: false,
+      reason: "skipped_missing_actor",
+      type: "idea_create",
+    };
+  }
+
+  const captureFn = deps.captureIdeaFn || captureIdea;
+  const result = await captureFn({
+    text: content,
+    actorKey,
+    telegramUserId: userId,
+    chatId: context.chatId,
+    source: context.inputSource === "voice" ? "voice" : "text",
+    category: action.payload?.category,
+    tags: action.payload?.tags,
+    confidence: action.confidence,
+    skipAi: deps.skipIdeaAi === true,
+    origin: "ai_router",
+  });
+
+  if (!result?.ok || !result.idea) {
+    return {
+      executed: false,
+      reason: result?.reason || "domain_error",
+      type: "idea_create",
+    };
+  }
+
+  return {
+    executed: true,
+    reason: "idea_created",
+    type: "idea_create",
+    idea: result.idea,
+  };
+}
+
 /**
- * Executes already-validated actions (see actionValidator.js) for ONE
- * incoming message, preserving their original order. Never throws — a
- * failure in one action is recorded and execution continues with the
- * next one; a domain-service failure never crashes routing.
- *
- * @param {object[]} actions - validated actions (contracts.js shape).
- * @param {{ mode: "shadow"|"active", chatId?: *, userId?: *, username?: string|null, firstName?: string|null, requestKey?: string|null }} context
- * @param {object} [deps] - injected for tests; defaults to the real services.
- * @param {Function} [deps.saveMemoryFn]
- * @param {Function} [deps.classifyMemoryFn]
- * @returns {Promise<{ results: object[], executedCount: number, skippedCount: number }>}
+ * Executes already-validated actions for ONE incoming message.
  */
 export async function executeActions(actions, context = {}, deps = {}) {
-  const { saveMemoryFn = saveMemory, classifyMemoryFn = classifyMemory } = deps;
+  const {
+    saveMemoryFn = saveMemory,
+    classifyMemoryFn = classifyMemory,
+    captureIdeaFn,
+    skipIdeaAi,
+  } = deps;
 
   const results = [];
   const seenSignatures = new Set();
 
   for (const action of Array.isArray(actions) ? actions : []) {
-    // Defense in depth: actionValidator.js already forces this on
-    // destructive actions and blocks voice-destructive outright — this
-    // second check guarantees the executor itself can never run an
-    // action still pending explicit user confirmation, regardless of
-    // how it got here.
     if (action.requiresConfirmation) {
       results.push({
         action,
@@ -219,11 +249,26 @@ export async function executeActions(actions, context = {}, deps = {}) {
     let outcome;
 
     try {
-      outcome =
-        action.type === "task_create"
-          ? await runTaskCreate(action, context, { saveMemoryFn })
-          : await runMemorySave(action, context, { saveMemoryFn, classifyMemoryFn });
-    } catch (error) {
+      if (action.type === "task_create") {
+        outcome = await runTaskCreate(action, context, { saveMemoryFn });
+      } else if (action.type === "memory_save") {
+        outcome = await runMemorySave(action, context, {
+          saveMemoryFn,
+          classifyMemoryFn,
+        });
+      } else if (action.type === "idea_create") {
+        outcome = await runIdeaCreate(action, context, {
+          captureIdeaFn,
+          skipIdeaAi,
+        });
+      } else {
+        outcome = {
+          executed: false,
+          reason: reasonForUnexecutedType(action.type),
+          type: action.type,
+        };
+      }
+    } catch {
       outcome = { executed: false, reason: "domain_error", type: action.type };
     }
 
@@ -236,5 +281,9 @@ export async function executeActions(actions, context = {}, deps = {}) {
 
   const executedCount = results.filter((result) => result.executed).length;
 
-  return { results, executedCount, skippedCount: results.length - executedCount };
+  return {
+    results,
+    executedCount,
+    skippedCount: results.length - executedCount,
+  };
 }

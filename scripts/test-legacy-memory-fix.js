@@ -142,7 +142,8 @@ await test("1) same-actor memory returned by recall", async () => {
     { answerEngine: engine, sendMessageFn: async (_c, t) => sent.push(t) }
   );
   assert.equal(r.handled, true);
-  assert.match(sent.join("\n"), /нравится работать ночью/i);
+  assert.match(sent.join("\n"), /Found|Open in ALMAS/i);
+  assert.match(String(r.result?.answer || ""), /ночью/i);
 });
 
 await test("2) actorKey normalization works", () => {
@@ -171,7 +172,7 @@ await test("3) metadata userId/chatId variants handled safely", () => {
 await test("4) actor A cannot retrieve actor B memory", async () => {
   const engine = engineWithMemoryStore(memoryStoreFor("42"));
   const sent = [];
-  await maybeHandleAnswerQuestion(
+  const r = await maybeHandleAnswerQuestion(
     {
       chatId: 1,
       text: "Что ты знаешь о моих предпочтениях?",
@@ -180,16 +181,21 @@ await test("4) actor A cannot retrieve actor B memory", async () => {
     },
     { answerEngine: engine, sendMessageFn: async (_c, t) => sent.push(t) }
   );
+  assert.match(sent.join("\n"), /Nothing found|Found|Open in ALMAS/i);
+  const answer = String(r.result?.answer || "");
   assert.ok(
-    /Недостаточно|не знаю|Уточните/i.test(sent.join("\n")),
-    `expected empty for other actor, got: ${sent.join(" | ")}`
+    /Недостаточно|не знаю|Уточните|Nothing found/i.test(
+      `${sent.join("\n")}\n${answer}`
+    ) || !/ночью/i.test(answer),
+    `expected empty for other actor, got telegram=${sent.join(" | ")} answer=${answer}`
   );
+  assert.ok(!/ночью/i.test(answer));
 });
 
 await test("5) вспомни что мне нравится returns preference", async () => {
   const engine = engineWithMemoryStore(memoryStoreFor("42"));
   const sent = [];
-  await maybeHandleAnswerQuestion(
+  const r = await maybeHandleAnswerQuestion(
     {
       chatId: 1,
       text: "вспомни что мне нравится",
@@ -198,14 +204,15 @@ await test("5) вспомни что мне нравится returns preference"
     },
     { answerEngine: engine, sendMessageFn: async (_c, t) => sent.push(t) }
   );
-  assert.match(sent.join("\n"), /нравится работать ночью/i);
-  assert.ok(!/Недостаточно надёжных данных/i.test(sent.join("\n")));
+  assert.match(sent.join("\n"), /Found|Open in ALMAS/i);
+  assert.match(String(r.result?.answer || ""), /ночью/i);
+  assert.ok(!/Недостаточно надёжных данных/i.test(String(r.result?.answer || "")));
 });
 
 await test("6) Что ты знаешь обо мне? returns saved memory", async () => {
   const engine = engineWithMemoryStore(memoryStoreFor("42"));
   const sent = [];
-  await maybeHandleAnswerQuestion(
+  const r = await maybeHandleAnswerQuestion(
     {
       chatId: 1,
       text: "Что ты знаешь обо мне?",
@@ -214,13 +221,14 @@ await test("6) Что ты знаешь обо мне? returns saved memory", as
     },
     { answerEngine: engine, sendMessageFn: async (_c, t) => sent.push(t) }
   );
-  assert.match(sent.join("\n"), /нравится работать ночью/i);
+  assert.match(sent.join("\n"), /Found|Open in ALMAS/i);
+  assert.match(String(r.result?.answer || ""), /ночью/i);
 });
 
 await test("7) Что ты знаешь о моих предпочтениях? returns preference", async () => {
   const engine = engineWithMemoryStore(memoryStoreFor("42"));
   const sent = [];
-  await maybeHandleAnswerQuestion(
+  const r = await maybeHandleAnswerQuestion(
     {
       chatId: 1,
       text: "Что ты знаешь о моих предпочтениях?",
@@ -229,13 +237,14 @@ await test("7) Что ты знаешь о моих предпочтениях? 
     },
     { answerEngine: engine, sendMessageFn: async (_c, t) => sent.push(t) }
   );
-  assert.match(sent.join("\n"), /нравится работать ночью/i);
+  assert.match(sent.join("\n"), /Found|Open in ALMAS/i);
+  assert.match(String(r.result?.answer || ""), /ночью/i);
 });
 
 await test("8) no-match stays honest", async () => {
   const engine = engineWithMemoryStore([]);
   const sent = [];
-  await maybeHandleAnswerQuestion(
+  const r = await maybeHandleAnswerQuestion(
     {
       chatId: 1,
       text: "вспомни что мне нравится",
@@ -244,11 +253,15 @@ await test("8) no-match stays honest", async () => {
     },
     { answerEngine: engine, sendMessageFn: async (_c, t) => sent.push(t) }
   );
+  assert.match(sent.join("\n"), /Nothing found|Open in ALMAS/i);
+  const answer = String(r.result?.answer || "");
   assert.ok(
-    /Недостаточно|не знаю|Уточните/i.test(sent.join("\n")),
-    `expected honest unknown, got: ${sent.join(" | ")}`
+    /Недостаточно|не знаю|Уточните/i.test(answer) ||
+      /Nothing found/i.test(sent.join("\n")),
+    `expected honest unknown, got telegram=${sent.join(" | ")} answer=${answer}`
   );
   assert.ok(!/ночью/i.test(sent.join("\n")));
+  assert.ok(!/ночью/i.test(answer));
 });
 
 await test("9) mapped evidence has valid scope/domain/confidence/provenance", () => {
@@ -292,11 +305,8 @@ await test("10) valid memory evidence passes answer threshold", () => {
 
 await test("11) save flow remains unchanged", () => {
   const src = readFileSync(join(root, "handlers/messageHandler.js"), "utf8");
-  assert.match(src, /🧠 Запомнил\./);
-  assert.match(
-    src,
-    /const saved = await saveMemory\([\s\S]*?\);\s*\n\s*if \(saved\) \{\s*\n\s*await bot\.sendMessage\(chatId, "🧠 Запомнил\."\);\s*\n\s*return;/
-  );
+  assert.match(src, /THIN_CONFIRM\.memory/);
+  assert.match(src, /saveMemory\(/);
   assert.match(src, /extractLegacyMemorySaveContent/);
 });
 
@@ -329,14 +339,14 @@ await test("memory saves once with confirmation and no fallback", async () => {
         : text,
   });
   if (saved) {
-    await sendMessage(1, "🧠 Запомнил.");
+    await sendMessage(1, "🧠 Saved.\n\nOpen ALMAS →");
   } else {
     await sendFallback();
   }
 
   assert.equal(saveCalls, 1);
   assert.equal(savedContent, "Мне нравится работать ночью");
-  assert.deepEqual(sent, ["🧠 Запомнил."]);
+  assert.deepEqual(sent, ["🧠 Saved.\n\nOpen ALMAS →"]);
   assert.ok(!sent.includes("FALLBACK"));
 });
 

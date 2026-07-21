@@ -13,6 +13,12 @@ const mockClient: AlmasApiClient = {
   getTasks: () => mockApi.getTasks(),
   patchTask: (id, patch) => mockApi.patchTask(id, patch),
   getKnowledge: () => mockApi.getKnowledge(),
+  getMemory: () => mockApi.getMemory(),
+  getCaptureSession: (sessionId) => mockApi.getCaptureSession(sessionId),
+  patchCaptureSession: (sessionId, body) =>
+    mockApi.patchCaptureSession(sessionId, body),
+  confirmCaptureSession: (sessionId) => mockApi.confirmCaptureSession(sessionId),
+  cancelCaptureSession: (sessionId) => mockApi.cancelCaptureSession(sessionId),
 };
 
 export function resolveApiClient(mode: ApiMode = getApiMode()): AlmasApiClient {
@@ -28,4 +34,7 @@ export const API_ROUTES = {
   financeTransactions: "GET /api/finance/transactions",
   tasks: "GET /api/tasks",
   knowledge: "GET /api/knowledge",
+  memory: "GET /api/memory",
+  capture: "GET /api/capture/:sessionId",
+  ideas: "GET /api/ideas",
 } as const;

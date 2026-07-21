@@ -5,6 +5,7 @@
 
 import { createEvidenceItem } from "./answerContracts.js";
 import { normalizeMemoryFactContent } from "../storage/memoryFilter.js";
+import { normalizeIdeaCategory } from "../ideas/ideaContracts.js";
 
 /**
  * @param {object|null} pending - clarification pending record
@@ -291,10 +292,6 @@ export function collectDomainEvidence(source, payload) {
     for (const m of payload.slice(0, 10)) {
       const content = normalizeMemoryFactContent(m.content ?? m.text ?? "");
       if (!content) continue;
-      // Actor-scoped legacy memory is personal evidence. Raw cosine
-      // similarity alone undervalues direct preference matches (e.g. 0.3–0.5
-      // after "вспомни…" noise) and fails minAnswerConfidence — floor only
-      // for this source mapping, not the global Answer Engine threshold.
       const raw = clamp(m.similarity ?? m.confidence, 0.7);
       const confidence = Math.max(raw, 0.75);
       const domain = looksLikePreferenceMemory(content)
@@ -319,6 +316,49 @@ export function collectDomainEvidence(source, payload) {
           },
           content,
           summary: content.slice(0, 280),
+        })
+      );
+    }
+  }
+
+  if (source === "ideas" && Array.isArray(payload)) {
+    for (const idea of payload.slice(0, 12)) {
+      const content = String(
+        idea.normalizedText ?? idea.originalText ?? idea.content ?? ""
+      ).trim();
+      if (!content) continue;
+      const confidence = Math.max(
+        clamp(idea.similarity ?? idea.confidence, 0.7),
+        0.75
+      );
+      const tags = Array.isArray(idea.tags) ? idea.tags.slice(0, 6) : [];
+      const category = normalizeIdeaCategory(idea.category);
+      const domain = `ideas/${category}`;
+      const summary = tags.length
+        ? `${content} [${category}: ${tags.join(", ")}]`
+        : `${content} [${category}]`;
+      const createdAt = parseMemoryTimestamp({
+        created_at: idea.createdAt ?? idea.created_at,
+      });
+      items.push(
+        createEvidenceItem({
+          id: idea.id != null ? `idea:${idea.id}` : null,
+          source: "ideas",
+          scope: "personal",
+          confidence,
+          timestamp: createdAt ?? Date.now(),
+          domain,
+          factId: idea.id != null ? String(idea.id) : null,
+          reason: "idea_hit",
+          provenance: {
+            sourceType: "ideas_service",
+            provider: "ideas",
+            retrievedAt: Date.now(),
+            confidence,
+            category,
+          },
+          content,
+          summary: summary.slice(0, 280),
         })
       );
     }

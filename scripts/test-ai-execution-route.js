@@ -38,19 +38,22 @@ function executed(type, payload) {
 }
 
 async function run() {
-  await test("formatAiExecutionConfirmation: task_create renders '✅ Задача сохранена' + content", () => {
-    const text = formatAiExecutionConfirmation(executed("task_create", { content: "Купить батарейки" }));
-    assert.equal(text, "✅ Задача сохранена\n\nКупить батарейки");
+  await test("formatAiExecutionConfirmation: task_create is thin", () => {
+    const msg = formatAiExecutionConfirmation(executed("task_create", { content: "Купить батарейки" }));
+    assert.equal(typeof msg, "object");
+    assert.match(msg.text, /Task saved/);
+    assert.match(msg.text, /Open Tasks/);
   });
 
-  await test("formatAiExecutionConfirmation: memory_save renders exactly '🧠 Запомнил.'", () => {
-    const text = formatAiExecutionConfirmation(executed("memory_save", { content: "мне нравится работать ночью" }));
-    assert.equal(text, "🧠 Запомнил.");
+  await test("formatAiExecutionConfirmation: memory_save is thin", () => {
+    const msg = formatAiExecutionConfirmation(executed("memory_save", { content: "мне нравится работать ночью" }));
+    assert.equal(typeof msg, "object");
+    assert.match(msg.text, /Saved/);
   });
 
-  await test("formatAiExecutionConfirmation: task_create with no content still renders a confirmation (never invents content)", () => {
-    const text = formatAiExecutionConfirmation(executed("task_create", {}));
-    assert.equal(text, "✅ Задача сохранена");
+  await test("formatAiExecutionConfirmation: task_create with no content still confirms", () => {
+    const msg = formatAiExecutionConfirmation(executed("task_create", {}));
+    assert.match(msg.text, /Task saved/);
   });
 
   await test("formatAiExecutionConfirmation: unknown/unexpected type returns null (defense in depth)", () => {
@@ -65,7 +68,9 @@ async function run() {
       executed("finance_expense", { amount: 1 }),
       executed("memory_save", { content: "note" }),
     ]);
-    assert.deepEqual(texts, ["✅ Задача сохранена\n\nКупить батарейки", "🧠 Запомнил."]);
+    assert.equal(texts.length, 2);
+    assert.match(texts[0].text, /Task saved/);
+    assert.match(texts[1].text, /Saved/);
   });
 
   await test("formatAiExecutionConfirmations handles an empty/undefined list", () => {
@@ -82,8 +87,9 @@ async function run() {
     );
     assert.equal(sentCount, 2);
     assert.equal(sendMessageFn.calls.length, 2);
-    assert.deepEqual(sendMessageFn.calls[0], ["chat1", "✅ Задача сохранена\n\nКупить батарейки"]);
-    assert.deepEqual(sendMessageFn.calls[1], ["chat1", "🧠 Запомнил."]);
+    assert.equal(sendMessageFn.calls[0][0], "chat1");
+    assert.match(sendMessageFn.calls[0][1], /Task saved/);
+    assert.match(sendMessageFn.calls[1][1], /Saved/);
   });
 
   await test("sendAiExecutionConfirmations sends nothing for an empty executedActions list", async () => {

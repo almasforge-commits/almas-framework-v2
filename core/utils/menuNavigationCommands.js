@@ -16,6 +16,7 @@ export const MENU_NAVIGATION_COMMANDS = [
   "💰 финансы",
   "🧠 память",
   "🌐 открыть almas",
+  "❓ как пользоваться",
   "❓ помощь",
 ];
 

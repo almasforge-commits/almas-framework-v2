@@ -577,7 +577,8 @@ async function run() {
     await sendAiExecutionConfirmations("chat1", executedActions, {
       sendMessageFn: async (chatId, text) => sentTexts.push(text),
     });
-    assert.deepEqual(sentTexts, ["✅ Задача сохранена\n\nкупить батарейки"]);
+    assert.equal(sentTexts.length, 1);
+    assert.match(sentTexts[0], /Task saved/);
   });
 
   await test("Pure memory ('Запомни, что мне нравится работать ночью'): memory_save executes once, one confirmation is rendered, not duplicated", async () => {
@@ -609,7 +610,8 @@ async function run() {
     await sendAiExecutionConfirmations("chat1", executedActions, {
       sendMessageFn: async (chatId, text) => sentTexts.push(text),
     });
-    assert.deepEqual(sentTexts, ["🧠 Запомнил."]);
+    assert.equal(sentTexts.length, 1);
+    assert.match(sentTexts[0], /Saved/);
   });
 
   await test("Finance + Task ('Потратил 40000 на кофе и завтра купить батарейки'): task_create executes once via the AI router (Finance's own execution is the deterministic parser's job, covered in test-finance-description-cleanup.js)", async () => {
@@ -645,7 +647,8 @@ async function run() {
     await sendAiExecutionConfirmations("chat1", executedActions, {
       sendMessageFn: async (chatId, text) => sentTexts.push(text),
     });
-    assert.deepEqual(sentTexts, ["✅ Задача сохранена\n\nкупить батарейки"]);
+    assert.equal(sentTexts.length, 1);
+    assert.match(sentTexts[0], /Task saved/);
   });
 
   await test("Provider failure in active mode: ownership stays empty (normal legacy fallback runs)", async () => {

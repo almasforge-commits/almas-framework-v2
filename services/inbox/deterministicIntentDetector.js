@@ -7,6 +7,12 @@ import { isYouTubeLink } from "../content/youtubeService.js";
 import { normalizeCommandText } from "../../core/utils/normalizeUserText.js";
 import { isMenuNavigationCommand } from "../../core/utils/menuNavigationCommands.js";
 import { isMeaninglessShortInput } from "../../core/utils/isMeaninglessShortInput.js";
+import { isStrongIdeaCapture } from "../ideas/ideaDetector.js";
+import {
+  isIdeasRetrievalQuery,
+  isKnowledgeListCommand,
+  isKnowledgeOpenCommand,
+} from "../ideas/ideaQueryIntent.js";
 import { createRoutingContract, createAction } from "./contracts.js";
 
 // Tier 0 ("no AI"): reuses the SAME pure parsers/detectors the existing
@@ -58,8 +64,6 @@ const PREFIX_ACTIONS = [
   { prefix: "найди ", type: "search" },
   { prefix: "найти ", type: "search" },
   { prefix: "вспомни ", type: "search" },
-  { prefix: "открыть ", type: "knowledge_query" },
-  { prefix: "покажи ", type: "knowledge_query" },
   { prefix: "выполнено ", type: "system_command" },
   { prefix: "сколько потратил на ", type: "system_command" },
 ];
@@ -200,14 +204,54 @@ export function detectDeterministicIntent(text) {
 
   const lower = trimmed.toLowerCase();
 
+  // Ideas read/search before generic "покажи"/"открыть" knowledge prefixes.
+  if (isIdeasRetrievalQuery(trimmed)) {
+    return confidentContract(
+      createAction({
+        type: "chat",
+        confidence: 1,
+        payload: { query: trimmed, domain: "ideas" },
+      }),
+      "ideas_query"
+    );
+  }
+
+  if (isKnowledgeListCommand(trimmed)) {
+    return confidentContract(
+      createAction({
+        type: "knowledge_query",
+        confidence: 1,
+        payload: { command: "list_knowledge" },
+      }),
+      "exact_command"
+    );
+  }
+
+  if (isKnowledgeOpenCommand(trimmed)) {
+    return confidentContract(
+      createAction({
+        type: "knowledge_query",
+        confidence: 1,
+        payload: { query: trimmed },
+      }),
+      "prefix_command"
+    );
+  }
+
   for (const { prefix, type } of PREFIX_ACTIONS) {
     if (lower.startsWith(prefix)) {
+      // Do not claim bare "покажи …" / "открыть …" as knowledge unless
+      // it matched isKnowledgeOpenCommand above — otherwise Ideas/Answer
+      // (and other routes) never get a chance.
+      if (type === "knowledge_query") {
+        continue;
+      }
       return confidentContract(
         createAction({
           type,
           confidence: 1,
           payload:
-            type === "chat" || type === "search" || type === "knowledge_query"
+            type === "chat" || type === "search"
               ? { query: trimmed.slice(prefix.length).trim() }
               : { command: prefix.trim() },
         }),
@@ -228,6 +272,18 @@ export function detectDeterministicIntent(text) {
         "Не удалось распознать сумму. Уточните, пожалуйста, сколько и на что?",
       reasonCode: "unparsed_finance_attempt",
     });
+  }
+
+  // Strong idea capture patterns — save without forcing a category first.
+  if (isStrongIdeaCapture(trimmed)) {
+    return confidentContract(
+      createAction({
+        type: "idea_create",
+        confidence: 0.9,
+        payload: { content: trimmed },
+      }),
+      "idea_detected"
+    );
   }
 
   return null;

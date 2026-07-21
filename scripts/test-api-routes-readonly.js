@@ -126,6 +126,8 @@ async function run() {
         "/api/finance/transactions",
         "/api/tasks",
         "/api/knowledge",
+        "/api/memory",
+        "/api/capture/demo-session",
       ]) {
         const res = await request(base, path);
         assert.equal(res.status, 401, path);

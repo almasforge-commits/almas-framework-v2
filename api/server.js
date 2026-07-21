@@ -11,8 +11,14 @@ import { createFinanceReader } from "./readers/financeReader.js";
 import { createInboxReader } from "./readers/inboxReader.js";
 import { createTasksReader } from "./readers/tasksReader.js";
 import { createKnowledgeReader } from "./readers/knowledgeReader.js";
+import { createIdeasReader } from "./readers/ideasReader.js";
 import { createDashboardReader } from "./readers/dashboardReader.js";
+import { createCaptureReader } from "./readers/captureReader.js";
+import { createMemoryReader } from "./readers/memoryReader.js";
 import { parseCorsAllowlist } from "./cors.js";
+import { listIdeasForActor, searchIdeas, getIdeaById } from "../services/ideas/ideaService.js";
+import { defaultCaptureSessionStore } from "../services/capture/captureSessionStore.js";
+import { listMemoriesForActor } from "../services/storage/listMemoriesForActor.js";
 
 /**
  * Production wiring for the read-only Mini App API.
@@ -43,11 +49,41 @@ export function buildDefaultApp(env = process.env) {
   const tasksReader = createTasksReader({});
   const knowledgeReader = createKnowledgeReader({});
 
+  const ideasReader = createIdeasReader({
+    listIdeasForUserFn: async (actor, opts = {}) => {
+      const actorKey = actor?.actorKey;
+      if (!actorKey) return [];
+      return listIdeasForActor(actorKey, opts);
+    },
+    searchIdeasForUserFn: async (actor, opts = {}) => {
+      const actorKey = actor?.actorKey;
+      if (!actorKey) return [];
+      return searchIdeas(opts.q || "", {
+        actorKey,
+        category: opts.category,
+        limit: opts.limit || 20,
+      });
+    },
+    getIdeaForUserFn: async (actor, ideaId) => {
+      const actorKey = actor?.actorKey;
+      if (!actorKey) return null;
+      return getIdeaById(ideaId, actorKey);
+    },
+  });
+
   const dashboardReader = createDashboardReader({
     financeReader,
     inboxReader,
     tasksReader,
     knowledgeReader,
+  });
+
+  const captureReader = createCaptureReader({
+    store: defaultCaptureSessionStore,
+  });
+
+  const memoryReader = createMemoryReader({
+    listMemoriesForUserFn: listMemoriesForActor,
   });
 
   return createApp({
@@ -56,7 +92,11 @@ export function buildDefaultApp(env = process.env) {
     inboxReader,
     tasksReader,
     knowledgeReader,
+    ideasReader,
     dashboardReader,
+    captureReader,
+    memoryReader,
+    captureStore: defaultCaptureSessionStore,
     corsAllowlist: parseCorsAllowlist(env.ALMAS_API_CORS_ORIGIN),
   });
 }

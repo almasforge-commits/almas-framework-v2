@@ -6,16 +6,14 @@ import {
   buildTasksMenuKeyboard,
   buildFinanceMenuKeyboard,
   buildMemoryMenuKeyboard,
+  buildIdeasMenuKeyboard,
+  buildIdeasEmptyMenuKeyboard,
 } from "../keyboards/mainMenu.js";
-import { getAllKnowledge } from "../../services/storage/knowledgeService.js";
-import { getActiveTasks, getCompletedTasks } from "../../services/storage/taskService.js";
-import { getBalance, getHistory, getStatistics } from "../../services/finance/financeService.js";
+import { defaultNavigationContextStore } from "../../services/navigation/navigationContextStore.js";
+import { setNavigationListContext } from "../../services/navigation/navigationRoute.js";
 
-// Every section is read-only: it only calls the SAME existing service
-// functions the typed commands already use (getAllKnowledge,
-// getActiveTasks/getCompletedTasks, getBalance/getHistory/getStatistics)
-// — no Finance/Memory/Knowledge/Task business logic changes here, this
-// module only formats and sends messages.
+// Section menus are Telegram-thin: short teasers + Mini App deep links.
+// Domain lists/history/analytics live in the Mini App.
 //
 // Importing config/bot.js constructs a real, polling TelegramBot as a
 // module-level side effect (same reasoning as handlers/routes/voiceRoute.js)
@@ -32,127 +30,52 @@ function getBot() {
 
 const defaultSendMessageFn = async (chatId, text, extra) => (await getBot()).sendMessage(chatId, text, extra);
 
-const BALANCE_FLAGS = { VND: "🇻🇳", USD: "🇺🇸", KZT: "🇰🇿", RUB: "🇷🇺", EUR: "🇪🇺" };
+export const MAIN_MENU_GREETING =
+  "👋 ALMAS готов.\n\nПросто напишите или скажите, что хотите сохранить или сделать.";
 
-function formatBalanceBlock(balances) {
-  if (!Object.keys(balances).length) return null;
-
-  let message = "💰 Баланс\n\n";
-
-  for (const [currency, data] of Object.entries(balances)) {
-    message += `${BALANCE_FLAGS[currency] || "💵"} ${currency}\n`;
-    message += `Доход: ${Number(data.income).toLocaleString()}\n`;
-    message += `Расход: ${Number(data.expense).toLocaleString()}\n`;
-    message += `Остаток: ${Number(data.balance).toLocaleString()}\n\n`;
-  }
-
-  return message.trimEnd();
-}
-
-function formatHistoryBlock(history, title = "📒 Последние операции") {
-  if (!history.length) return null;
-
-  let message = `${title}\n\n`;
-
-  history.forEach((item, index) => {
-    const emoji = item.type === "income" ? "💰" : "💸";
-
-    message += `${index + 1}. ${emoji} ${Number(item.amount).toLocaleString()} ${item.currency || "VND"}`;
-
-    if (item.category) message += ` • ${item.category}`;
-    if (item.description) message += ` — ${item.description}`;
-
-    message += "\n";
-  });
-
-  return message.trimEnd();
-}
-
-function formatStatisticsBlock(stats) {
-  if (!stats || stats.transactions === 0) return null;
-
-  let message = "📊 Статистика\n\n";
-  message += `📒 Операций: ${stats.transactions}\n\n`;
-  message += "📈 Доходы\n";
-
-  for (const [currency, amount] of Object.entries(stats.incomes)) {
-    message += `• ${currency}: ${Number(amount).toLocaleString()}\n`;
-  }
-
-  message += "\n📉 Расходы\n";
-
-  for (const [currency, amount] of Object.entries(stats.expenses)) {
-    message += `• ${currency}: ${Number(amount).toLocaleString()}\n`;
-  }
-
-  if (stats.biggestExpense) {
-    message += `\n\n━━━━━━━━━━━━━━\n\n🏆 Самая большая покупка\n\n${stats.biggestExpense.description || "Без описания"}\n\n${Number(stats.biggestExpense.amount).toLocaleString()} ${stats.biggestExpense.currency}`;
-  }
-
-  return message;
-}
-
-function formatKnowledgeListBlock(knowledge, title) {
-  if (!knowledge.length) return null;
-
-  let message = `${title}\n\n`;
-
-  knowledge.forEach((item, index) => {
-    message += `${index + 1}. ${item.title}\n`;
-  });
-
-  return message.trimEnd();
-}
-
-function formatTaskListBlock(tasks, title) {
-  if (!tasks.length) return null;
-
-  let message = `${title}\n\n`;
-
-  tasks.forEach((task, index) => {
-    message += `${index + 1}. ${task.content}\n`;
-  });
-
-  return message.trimEnd();
-}
+export const FALLBACK_PROMPT =
+  "Не понял запрос. Напишите иначе или откройте ALMAS 👇";
 
 export async function sendMainMenu(chatId, options = {}) {
-  const { sendMessageFn = defaultSendMessageFn } = options;
+  const {
+    sendMessageFn = defaultSendMessageFn,
+    actorKey = null,
+    navigationStore = defaultNavigationContextStore,
+  } = options;
+  if (actorKey) {
+    navigationStore.clear(actorKey, chatId);
+  }
   const { reply_markup } = buildMainMenuKeyboard();
-  await sendMessageFn(chatId, "👋 ALMAS готов. Выбери раздел:", { reply_markup });
+  await sendMessageFn(chatId, MAIN_MENU_GREETING, { reply_markup });
 }
 
 export async function sendFallback(chatId, options = {}) {
   const { sendMessageFn = defaultSendMessageFn } = options;
   const { reply_markup } = buildMainMenuKeyboard();
-  await sendMessageFn(chatId, "Не понял запрос. Выбери раздел в меню 👇", { reply_markup });
+  await sendMessageFn(chatId, FALLBACK_PROMPT, { reply_markup });
 }
 
 export async function sendKnowledgeMenu(chatId, options = {}) {
-  const { sendMessageFn = defaultSendMessageFn, getAllKnowledgeFn = getAllKnowledge } = options;
+  const {
+    sendMessageFn = defaultSendMessageFn,
+    actorKey = null,
+    navigationStore = defaultNavigationContextStore,
+  } = options;
   const { reply_markup } = buildKnowledgeMenuKeyboard();
 
-  const knowledge = await getAllKnowledgeFn();
-  const latest = knowledge.slice(0, 5);
+  if (actorKey) {
+    setNavigationListContext(navigationStore, actorKey, chatId, "knowledge", []);
+  }
 
-  const message =
-    formatKnowledgeListBlock(latest, `📚 Знания (последние ${latest.length})`) ||
-    "📚 База знаний пока пуста.";
-
-  await sendMessageFn(chatId, message, { reply_markup });
+  await sendMessageFn(
+    chatId,
+    "📚 Knowledge\n\nOpen ALMAS →",
+    { reply_markup }
+  );
 }
 
 export async function sendKnowledgeAll(chatId, options = {}) {
-  const { sendMessageFn = defaultSendMessageFn, getAllKnowledgeFn = getAllKnowledge } = options;
-  const { reply_markup } = buildHomeOnlyKeyboard();
-
-  const knowledge = await getAllKnowledgeFn();
-
-  const message =
-    formatKnowledgeListBlock(knowledge, `📚 Всего знаний: ${knowledge.length}`) ||
-    "📚 База знаний пока пуста.";
-
-  await sendMessageFn(chatId, message, { reply_markup });
+  return sendKnowledgeMenu(chatId, options);
 }
 
 export async function sendKnowledgeSearchInstruction(chatId, options = {}) {
@@ -162,83 +85,74 @@ export async function sendKnowledgeSearchInstruction(chatId, options = {}) {
 }
 
 export async function sendTasksMenu(chatId, options = {}) {
-  const { sendMessageFn = defaultSendMessageFn, getActiveTasksFn = getActiveTasks } = options;
+  const {
+    sendMessageFn = defaultSendMessageFn,
+    actorKey = null,
+    navigationStore = defaultNavigationContextStore,
+  } = options;
   const { reply_markup } = buildTasksMenuKeyboard();
 
-  const tasks = await getActiveTasksFn();
-  const latest = tasks.slice(0, 5);
+  if (actorKey) {
+    setNavigationListContext(navigationStore, actorKey, chatId, "tasks", []);
+  }
 
-  const message =
-    formatTaskListBlock(latest, `📋 Задачи (последние ${latest.length})`) ||
-    "📋 У тебя пока нет активных задач.";
-
-  await sendMessageFn(chatId, message, { reply_markup });
+  await sendMessageFn(
+    chatId,
+    "📋 Tasks\n\nOpen ALMAS →",
+    { reply_markup }
+  );
 }
 
 export async function sendCompletedTasksList(chatId, options = {}) {
-  const { sendMessageFn = defaultSendMessageFn, getCompletedTasksFn = getCompletedTasks } = options;
-  const { reply_markup } = buildHomeOnlyKeyboard();
-
-  const tasks = await getCompletedTasksFn();
-
-  const message = formatTaskListBlock(tasks, "✅ Выполненные задачи") || "✅ Пока нет выполненных задач.";
-
-  await sendMessageFn(chatId, message, { reply_markup });
+  return sendTasksMenu(chatId, options);
 }
 
 export async function sendFinanceMenu(chatId, userId, options = {}) {
   const {
     sendMessageFn = defaultSendMessageFn,
-    getBalanceFn = getBalance,
-    getHistoryFn = getHistory,
+    actorKey = null,
+    navigationStore = defaultNavigationContextStore,
   } = options;
   const { reply_markup } = buildFinanceMenuKeyboard();
 
-  const balances = await getBalanceFn(userId);
-  const history = await getHistoryFn(userId, 5);
+  if (actorKey) {
+    setNavigationListContext(navigationStore, actorKey, chatId, "finance", [], {
+      screen: "summary",
+    });
+  }
 
-  const balanceBlock = formatBalanceBlock(balances);
-  const historyBlock = formatHistoryBlock(history, "📒 Последние операции");
-
-  const message =
-    [balanceBlock, historyBlock].filter(Boolean).join("\n\n━━━━━━━━━━━━━━\n\n") ||
-    "История пока пустая.";
-
-  await sendMessageFn(chatId, message, { reply_markup });
+  await sendMessageFn(
+    chatId,
+    "💰 Finance\n\nOpen ALMAS →",
+    { reply_markup }
+  );
 }
 
 export async function sendFinanceHistory(chatId, userId, options = {}) {
-  const { sendMessageFn = defaultSendMessageFn, getHistoryFn = getHistory } = options;
-  const { reply_markup } = buildHomeOnlyKeyboard();
-
-  const history = await getHistoryFn(userId);
-
-  const message = formatHistoryBlock(history) || "История пока пустая.";
-
-  await sendMessageFn(chatId, message, { reply_markup });
+  return sendFinanceMenu(chatId, userId, options);
 }
 
 export async function sendFinanceStatistics(chatId, userId, options = {}) {
-  const { sendMessageFn = defaultSendMessageFn, getStatisticsFn = getStatistics } = options;
-  const { reply_markup } = buildHomeOnlyKeyboard();
-
-  const stats = await getStatisticsFn(userId);
-
-  const message = formatStatisticsBlock(stats) || "История пока пустая.";
-
-  await sendMessageFn(chatId, message, { reply_markup });
+  return sendFinanceMenu(chatId, userId, options);
 }
 
 export async function sendMemoryMenu(chatId, options = {}) {
-  const { sendMessageFn = defaultSendMessageFn } = options;
+  const {
+    sendMessageFn = defaultSendMessageFn,
+    actorKey = null,
+    navigationStore = defaultNavigationContextStore,
+  } = options;
   const { reply_markup } = buildMemoryMenuKeyboard();
 
-  const message =
-    "🧠 Память\n\n" +
-    "ALMAS запоминает заметки, идеи и важные фразы, которые ты присылаешь. " +
-    "Используй кнопки ниже, чтобы вспомнить или найти что-то в памяти.";
+  if (actorKey) {
+    setNavigationListContext(navigationStore, actorKey, chatId, "memory", []);
+  }
 
-  await sendMessageFn(chatId, message, { reply_markup });
+  await sendMessageFn(
+    chatId,
+    "🧠 Memory\n\nOpen ALMAS →",
+    { reply_markup }
+  );
 }
 
 export async function sendMemoryRecallInstruction(chatId, options = {}) {
@@ -253,9 +167,97 @@ export async function sendMemorySearchInstruction(chatId, options = {}) {
   await sendMessageFn(chatId, "🔎 Напиши: найди <запрос>", { reply_markup });
 }
 
-export async function sendIdeasPlaceholder(chatId, options = {}) {
+export async function sendMemorySaveInstruction(chatId, options = {}) {
   const { sendMessageFn = defaultSendMessageFn } = options;
-  await sendMessageFn(chatId, "💡 Идеи — раздел готовится.");
+  const { reply_markup } = buildHomeOnlyKeyboard();
+  await sendMessageFn(
+    chatId,
+    "➕ Напишите:\n«Запомни, что...»",
+    { reply_markup }
+  );
+}
+
+export async function sendMemoryHelp(chatId, options = {}) {
+  const { sendMessageFn = defaultSendMessageFn } = options;
+  const { reply_markup } = buildHomeOnlyKeyboard();
+  await sendMessageFn(
+    chatId,
+    "🧠 Как работает память\n\n" +
+      "Напишите «Запомни, что …» — ALMAS сохранит факт.\n" +
+      "Спросите «Что ты знаешь обо мне?» или нажмите «Вспомнить».",
+    { reply_markup }
+  );
+}
+
+/**
+ * Main-menu Ideas entry: thin Telegram teaser; lists live in Mini App.
+ */
+export async function sendIdeasMenu(chatId, options = {}) {
+  const {
+    sendMessageFn = defaultSendMessageFn,
+    actorKey = null,
+    navigationStore = defaultNavigationContextStore,
+  } = options;
+
+  const { reply_markup } = actorKey
+    ? buildIdeasMenuKeyboard()
+    : buildIdeasEmptyMenuKeyboard();
+
+  if (actorKey) {
+    setNavigationListContext(navigationStore, actorKey, chatId, "ideas", []);
+  }
+
+  await sendMessageFn(
+    chatId,
+    actorKey
+      ? "💡 Ideas\n\nOpen ALMAS →"
+      : [
+          "💡 Пока идей нет.",
+          "",
+          "Напишите или скажите:",
+          "«У меня идея...»",
+        ].join("\n"),
+    { reply_markup }
+  );
+}
+
+/** @deprecated alias — main menu now opens the list via sendIdeasMenu */
+export async function sendIdeasPlaceholder(chatId, options = {}) {
+  return sendIdeasMenu(chatId, options);
+}
+
+export async function sendIdeasSearchInstruction(chatId, options = {}) {
+  const { sendMessageFn = defaultSendMessageFn } = options;
+  const { reply_markup } = buildHomeOnlyKeyboard();
+  await sendMessageFn(
+    chatId,
+    "🔍 Напишите:\n«Покажи идеи про …» или «Найди идеи про …»",
+    { reply_markup }
+  );
+}
+
+export async function sendIdeasNewInstruction(chatId, options = {}) {
+  const { sendMessageFn = defaultSendMessageFn } = options;
+  const { reply_markup } = buildHomeOnlyKeyboard();
+  await sendMessageFn(
+    chatId,
+    "➕ Напишите или скажите:\n«У меня идея...»",
+    { reply_markup }
+  );
+}
+
+export async function sendIdeasHelp(chatId, options = {}) {
+  const { sendMessageFn = defaultSendMessageFn } = options;
+  const { reply_markup } = buildHomeOnlyKeyboard();
+  await sendMessageFn(
+    chatId,
+    "💡 Как сохранять идеи\n\n" +
+      "Просто напишите или скажите мысль — например «У меня идея…».\n" +
+      "ALMAS сохранит и классифицирует сам.\n\n" +
+      "Список: «Какие у меня идеи?»\n" +
+      "Открыть: «Открой идею 2»",
+    { reply_markup }
+  );
 }
 
 export async function sendProjectsPlaceholder(chatId, options = {}) {
@@ -265,49 +267,32 @@ export async function sendProjectsPlaceholder(chatId, options = {}) {
 
 export async function sendOpenAlmas(chatId, options = {}) {
   const { sendMessageFn = defaultSendMessageFn, webAppUrl = ALMAS_WEB_APP_URL } = options;
+  const { reply_markup } = buildMainMenuKeyboard();
 
   const message = webAppUrl
-    ? "🌐 ALMAS доступен через кнопку меню."
-    : "Веб-интерфейс пока не подключён.";
+    ? "🌐 ALMAS открывается через кнопку меню."
+    : "Mini App пока не подключён.";
 
-  await sendMessageFn(chatId, message);
+  await sendMessageFn(chatId, message, { reply_markup });
 }
+
+export const HELP_ONBOARDING_MESSAGE = `❓ Как пользоваться ALMAS
+
+Просто напишите или скажите голосом, что произошло.
+
+Например:
+• «Потратил 80 000 VND на кофе»
+• «У меня идея снять ролик про Вьетнам»
+• «Завтра позвонить Арману»
+• «Запомни, что мне нравится работать ночью»
+• Можно рассказать всё одним сообщением
+
+ALMAS сам разберёт информацию и сохранит её в нужные разделы.
+
+Просмотр и управление данными — в Mini App.`;
 
 export async function sendHelp(chatId, options = {}) {
   const { sendMessageFn = defaultSendMessageFn } = options;
-  const { reply_markup } = buildHomeOnlyKeyboard();
-
-  const message = `Пока я умею:
-
-👋 Привет
-
-💸 Финансы
-• расход 100 кофе
-• доход 5000 зарплата
-• баланс
-• история
-• статистика
-• расходы за сегодня
-• расходы за неделю
-• расходы за месяц
-
-📚 Знания
-• мои знания
-• открыть 1
-• спроси ...
-• найди ...
-
-🧠 Память
-• вспомни ...
-
-📋 Задачи
-• мои задачи
-• выполнено 1
-• выполненные задачи
-
-🎥 Анализ YouTube
-
-🗑 Удалить все знания`;
-
-  await sendMessageFn(chatId, message, { reply_markup });
+  const { reply_markup } = buildMainMenuKeyboard();
+  await sendMessageFn(chatId, HELP_ONBOARDING_MESSAGE, { reply_markup });
 }

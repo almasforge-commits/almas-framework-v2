@@ -14,6 +14,7 @@ import {
   sendMemoryMenu,
   sendMemoryRecallInstruction,
   sendMemorySearchInstruction,
+  sendIdeasMenu,
   sendIdeasPlaceholder,
   sendProjectsPlaceholder,
   sendOpenAlmas,
@@ -56,48 +57,42 @@ async function run() {
     assert.equal(sendMessageFn.calls.length, 1);
     const [chatId, text, extra] = sendMessageFn.calls[0];
     assert.equal(chatId, "chat1");
-    assert.equal(text, "👋 ALMAS готов. Выбери раздел:");
+    assert.match(text, /ALMAS готов/);
+    assert.match(text, /напишите или скажите/i);
+    assert.ok(!/Выбери раздел/i.test(text));
     assert.ok(extra.reply_markup.keyboard);
+    assert.equal(extra.reply_markup.keyboard.length, 2);
   });
 
   await test("sendFallback sends the exact short fallback text with the main keyboard", async () => {
     const sendMessageFn = spy();
     await sendFallback("chat1", { sendMessageFn });
     const [, text, extra] = sendMessageFn.calls[0];
-    assert.equal(text, "Не понял запрос. Выбери раздел в меню 👇");
+    assert.match(text, /Не понял запрос/);
     assert.ok(extra.reply_markup.keyboard);
   });
 
-  await test("sendKnowledgeMenu lists at most the latest 5 items (via getAllKnowledge) with the knowledge inline keyboard", async () => {
+  await test("sendKnowledgeMenu is thin Mini App teaser", async () => {
     const sendMessageFn = spy();
-    const items = Array.from({ length: 8 }, (_, i) => ({ title: `Item ${i + 1}` }));
-    const getAllKnowledgeFn = spy(() => items);
-    await sendKnowledgeMenu("chat1", { sendMessageFn, getAllKnowledgeFn });
+    await sendKnowledgeMenu("chat1", { sendMessageFn });
     const [, text, extra] = sendMessageFn.calls[0];
-    assert.match(text, /Item 1/);
-    assert.match(text, /Item 5/);
-    assert.doesNotMatch(text, /Item 6/);
-    assert.ok(extra.reply_markup.inline_keyboard.flat().some((b) => b.callback_data === "menu:knowledge:all"));
+    assert.match(text, /Knowledge/);
+    assert.match(text, /Open ALMAS/);
+    assert.ok(extra.reply_markup.inline_keyboard);
   });
 
-  await test("sendKnowledgeMenu shows an empty-state message when there is no knowledge yet", async () => {
+  await test("sendKnowledgeMenu empty still thin", async () => {
     const sendMessageFn = spy();
-    const getAllKnowledgeFn = spy(() => []);
-    await sendKnowledgeMenu("chat1", { sendMessageFn, getAllKnowledgeFn });
+    await sendKnowledgeMenu("chat1", { sendMessageFn });
     const [, text] = sendMessageFn.calls[0];
-    assert.match(text, /пуста/);
+    assert.match(text, /Knowledge/);
   });
 
-  await test("sendKnowledgeAll lists every item (no slicing) with a home-only keyboard", async () => {
+  await test("sendKnowledgeAll redirects to thin knowledge menu", async () => {
     const sendMessageFn = spy();
-    const items = Array.from({ length: 8 }, (_, i) => ({ title: `Item ${i + 1}` }));
-    const getAllKnowledgeFn = spy(() => items);
-    await sendKnowledgeAll("chat1", { sendMessageFn, getAllKnowledgeFn });
-    const [, text, extra] = sendMessageFn.calls[0];
-    assert.match(text, /Item 8/);
-    assert.deepEqual(extra.reply_markup.inline_keyboard, [
-      [{ text: "🏠 Главная", callback_data: "menu:home" }],
-    ]);
+    await sendKnowledgeAll("chat1", { sendMessageFn });
+    const [, text] = sendMessageFn.calls[0];
+    assert.match(text, /Knowledge/);
   });
 
   await test("sendKnowledgeSearchInstruction is a stateless instruction to type the existing 'найди' command", async () => {
@@ -107,96 +102,83 @@ async function run() {
     assert.match(text, /найди/);
   });
 
-  await test("sendTasksMenu lists at most the latest 5 active tasks (via getActiveTasks)", async () => {
+  await test("sendTasksMenu is thin Mini App teaser", async () => {
     const sendMessageFn = spy();
-    const tasks = Array.from({ length: 7 }, (_, i) => ({ content: `Task ${i + 1}` }));
-    const getActiveTasksFn = spy(() => tasks);
-    await sendTasksMenu("chat1", { sendMessageFn, getActiveTasksFn });
+    await sendTasksMenu("chat1", { sendMessageFn });
     const [, text] = sendMessageFn.calls[0];
-    assert.match(text, /Task 1/);
-    assert.match(text, /Task 5/);
-    assert.doesNotMatch(text, /Task 6/);
+    assert.match(text, /Tasks/);
+    assert.match(text, /Open ALMAS/);
   });
 
-  await test("sendTasksMenu shows an empty-state message when there are no active tasks", async () => {
+  await test("sendTasksMenu empty still thin", async () => {
     const sendMessageFn = spy();
-    const getActiveTasksFn = spy(() => []);
-    await sendTasksMenu("chat1", { sendMessageFn, getActiveTasksFn });
+    await sendTasksMenu("chat1", { sendMessageFn });
     const [, text] = sendMessageFn.calls[0];
-    assert.match(text, /нет активных задач/);
+    assert.match(text, /Tasks/);
   });
 
-  await test("sendCompletedTasksList lists completed tasks (via getCompletedTasks) with a home-only keyboard", async () => {
+  await test("sendCompletedTasksList redirects to thin tasks menu", async () => {
     const sendMessageFn = spy();
-    const getCompletedTasksFn = spy(() => [{ content: "Done task" }]);
-    await sendCompletedTasksList("chat1", { sendMessageFn, getCompletedTasksFn });
-    const [, text, extra] = sendMessageFn.calls[0];
-    assert.match(text, /Done task/);
-    assert.deepEqual(extra.reply_markup.inline_keyboard, [
-      [{ text: "🏠 Главная", callback_data: "menu:home" }],
-    ]);
+    await sendCompletedTasksList("chat1", { sendMessageFn });
+    const [, text] = sendMessageFn.calls[0];
+    assert.match(text, /Tasks/);
   });
 
-  await test("sendFinanceMenu shows balance + latest 5 transactions (via getBalance/getHistory) for the given userId", async () => {
+  await test("sendFinanceMenu is thin Mini App teaser", async () => {
     const sendMessageFn = spy();
-    const getBalanceFn = spy();
-    getBalanceFn.impl = async () => ({ VND: { income: 100000, expense: 40000, balance: 60000 } });
-    const balanceSpy = spy((userId) => {
-      assert.equal(userId, "user42");
-      return { VND: { income: 100000, expense: 40000, balance: 60000 } };
-    });
-    const historySpy = spy((userId, limit) => {
-      assert.equal(userId, "user42");
-      assert.equal(limit, 5);
-      return [{ type: "expense", amount: 40000, currency: "VND", category: "Кофе" }];
-    });
     await sendFinanceMenu("chat1", "user42", {
       sendMessageFn,
-      getBalanceFn: balanceSpy,
-      getHistoryFn: historySpy,
+      actorKey: "telegram:42",
     });
     const [, text, extra] = sendMessageFn.calls[0];
-    assert.match(text, /Баланс/);
-    assert.match(text, /Последние операции/);
-    assert.ok(extra.reply_markup.inline_keyboard.flat().some((b) => b.callback_data === "menu:finance:history"));
+    assert.match(text, /Finance/);
+    assert.match(text, /Open ALMAS/);
+    assert.ok(extra.reply_markup.inline_keyboard);
   });
 
-  await test("sendFinanceHistory reuses getHistory's default limit and shows a home-only keyboard", async () => {
+  await test("sendFinanceHistory redirects to thin finance menu", async () => {
     const sendMessageFn = spy();
-    const getHistoryFn = spy((userId, limit) => {
-      assert.equal(userId, "user42");
-      assert.equal(limit, undefined);
-      return [{ type: "income", amount: 5000, currency: "VND" }];
-    });
-    await sendFinanceHistory("chat1", "user42", { sendMessageFn, getHistoryFn });
-    const [, text, extra] = sendMessageFn.calls[0];
-    assert.match(text, /5,000|5000/);
-    assert.deepEqual(extra.reply_markup.inline_keyboard, [
-      [{ text: "🏠 Главная", callback_data: "menu:home" }],
-    ]);
-  });
-
-  await test("sendFinanceStatistics reuses getStatistics and shows a home-only keyboard", async () => {
-    const sendMessageFn = spy();
-    const getStatisticsFn = spy(() => ({
-      transactions: 2,
-      incomes: { VND: 5000 },
-      expenses: { VND: 40000 },
-      biggestExpense: { description: "Кофе", amount: 40000, currency: "VND" },
-    }));
-    await sendFinanceStatistics("chat1", "user42", { sendMessageFn, getStatisticsFn });
+    await sendFinanceHistory("chat1", "user42", { sendMessageFn });
     const [, text] = sendMessageFn.calls[0];
-    assert.match(text, /Статистика/);
+    assert.match(text, /Finance/);
   });
 
-  await test("sendMemoryMenu sends a short explanation with recall/search inline buttons", async () => {
+  await test("sendFinanceStatistics redirects to thin finance menu", async () => {
     const sendMessageFn = spy();
-    await sendMemoryMenu("chat1", { sendMessageFn });
-    const [, , extra] = sendMessageFn.calls[0];
-    assert.deepEqual(
-      extra.reply_markup.inline_keyboard.flat().map((b) => b.callback_data),
-      ["menu:memory:recall", "menu:memory:search", "menu:home"]
-    );
+    await sendFinanceStatistics("chat1", "user42", { sendMessageFn });
+    const [, text] = sendMessageFn.calls[0];
+    assert.match(text, /Finance/);
+  });
+
+  await test("sendMemoryMenu is thin Mini App teaser with save shortcut", async () => {
+    const sendMessageFn = spy();
+    await sendMemoryMenu("chat1", {
+      sendMessageFn,
+      userId: "42",
+      actorKey: "telegram:42",
+    });
+    const [, text, extra] = sendMessageFn.calls[0];
+    assert.match(text, /Memory/);
+    assert.match(text, /Open ALMAS/);
+    const callbacks = extra.reply_markup.inline_keyboard
+      .flat()
+      .map((b) => b.callback_data)
+      .filter(Boolean);
+    assert.ok(callbacks.includes("menu:memory:save"));
+    assert.ok(!callbacks.includes("menu:home"));
+  });
+
+  await test("sendMemoryMenu empty state is still thin", async () => {
+    const sendMessageFn = spy();
+    await sendMemoryMenu("chat1", {
+      sendMessageFn,
+      userId: "42",
+      actorKey: "telegram:42",
+      listMemoriesFn: async () => [],
+    });
+    const [, text] = sendMessageFn.calls[0];
+    assert.match(text, /Memory/);
+    assert.match(text, /Open ALMAS/);
   });
 
   await test("sendMemoryRecallInstruction is a stateless instruction to type the existing 'вспомни' command", async () => {
@@ -213,11 +195,48 @@ async function run() {
     assert.match(text, /найди/);
   });
 
-  await test("sendIdeasPlaceholder sends the exact required placeholder text", async () => {
+  await test("sendIdeasMenu shows actor-scoped list, not help-only", async () => {
     const sendMessageFn = spy();
-    await sendIdeasPlaceholder("chat1", { sendMessageFn });
+    await sendIdeasMenu("chat1", {
+      sendMessageFn,
+      actorKey: "telegram:7",
+    });
+    const [, text, extra] = sendMessageFn.calls[0];
+    assert.match(text, /Ideas/);
+    assert.match(text, /Open ALMAS/);
+    const callbacks = extra.reply_markup.inline_keyboard
+      .flat()
+      .map((b) => b.callback_data)
+      .filter(Boolean);
+    assert.ok(callbacks.includes("menu:ideas:new"));
+    assert.ok(!callbacks.includes("menu:home"));
+  });
+
+  await test("sendIdeasMenu empty state", async () => {
+    const sendMessageFn = spy();
+    await sendIdeasMenu("chat1", {
+      sendMessageFn,
+      actorKey: null,
+    });
+    const [, text, extra] = sendMessageFn.calls[0];
+    assert.match(text, /Пока идей нет/);
+    assert.match(text, /У меня идея/);
+    const callbacks = extra.reply_markup.inline_keyboard
+      .flat()
+      .map((b) => b.callback_data)
+      .filter(Boolean);
+    assert.ok(callbacks.includes("menu:ideas:new"));
+    assert.ok(!callbacks.includes("menu:home"));
+  });
+
+  await test("sendIdeasPlaceholder aliases sendIdeasMenu", async () => {
+    const sendMessageFn = spy();
+    await sendIdeasPlaceholder("chat1", {
+      sendMessageFn,
+      actorKey: "telegram:1",
+    });
     const [, text] = sendMessageFn.calls[0];
-    assert.equal(text, "💡 Идеи — раздел готовится.");
+    assert.match(text, /Ideas/);
   });
 
   await test("sendProjectsPlaceholder sends the exact required placeholder text", async () => {
@@ -230,26 +249,28 @@ async function run() {
   await test("sendOpenAlmas shows the 'not connected' message when no Web App URL is configured", async () => {
     const sendMessageFn = spy();
     await sendOpenAlmas("chat1", { sendMessageFn, webAppUrl: null });
-    const [, text] = sendMessageFn.calls[0];
-    assert.equal(text, "Веб-интерфейс пока не подключён.");
+    const [, text, extra] = sendMessageFn.calls[0];
+    assert.equal(text, "Mini App пока не подключён.");
+    assert.ok(extra.reply_markup.keyboard);
   });
 
   await test("sendOpenAlmas shows a different message when a Web App URL is configured (edge case: label typed as text)", async () => {
     const sendMessageFn = spy();
     await sendOpenAlmas("chat1", { sendMessageFn, webAppUrl: "https://app.almas.example" });
     const [, text] = sendMessageFn.calls[0];
-    assert.notEqual(text, "Веб-интерфейс пока не подключён.");
+    assert.notEqual(text, "Mini App пока не подключён.");
   });
 
-  await test("sendHelp sends the full detailed command guide with a home-only keyboard", async () => {
+  await test("sendHelp sends concise onboarding with the main reply keyboard", async () => {
     const sendMessageFn = spy();
     await sendHelp("chat1", { sendMessageFn });
     const [, text, extra] = sendMessageFn.calls[0];
-    assert.match(text, /Пока я умею:/);
-    assert.match(text, /расход 100 кофе/);
-    assert.deepEqual(extra.reply_markup.inline_keyboard, [
-      [{ text: "🏠 Главная", callback_data: "menu:home" }],
-    ]);
+    assert.match(text, /Как пользоваться ALMAS/);
+    assert.match(text, /Потратил/);
+    assert.match(text, /идея/i);
+    assert.match(text, /Запомни/);
+    assert.ok(extra.reply_markup.keyboard);
+    assert.equal(extra.reply_markup.keyboard.length, 2);
   });
 
   if (process.exitCode) {

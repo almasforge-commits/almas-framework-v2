@@ -74,8 +74,8 @@ await test("question routes through Answer Engine", async () => {
   assert.equal(r.handled, true);
   assert.equal(answered, true);
   assert.equal(r.result.execution.type, "none");
-  assert.ok(sent[0].t.includes("WHOOP"));
-  assert.ok(sent[0].t.includes("Уверенность"));
+  assert.match(r.result.answer || "", /WHOOP/);
+  assert.match(sent[0].t, /Found|Open in ALMAS/);
 });
 
 await test("execution bypasses Answer Engine", async () => {

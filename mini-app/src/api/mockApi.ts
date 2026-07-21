@@ -1,10 +1,13 @@
 import type {
+  CaptureAction,
+  CaptureSessionDetail,
   FinancePeriod,
   FinanceSummary,
   FinanceTransaction,
   HomePayload,
   InboxItem,
   KnowledgeItem,
+  MemoryItem,
   Task,
 } from "./apiTypes";
 
@@ -363,6 +366,115 @@ export const mockApi = {
   async getKnowledge(): Promise<KnowledgeItem[]> {
     await delay(150);
     return KNOWLEDGE.map((item) => ({ ...item }));
+  },
+
+  async getMemory(): Promise<MemoryItem[]> {
+    await delay(120);
+    return [
+      {
+        id: "m1",
+        content: "Мне нравится работать ночью.",
+        createdAt: new Date().toISOString(),
+        type: "preference",
+      },
+      {
+        id: "m2",
+        content: "Мне нравится вьетнамский яичный кофе.",
+        createdAt: new Date().toISOString(),
+        type: "preference",
+      },
+    ];
+  },
+
+  async getCaptureSession(sessionId: string): Promise<CaptureSessionDetail> {
+    await delay(100);
+    return {
+      sessionId,
+      status: "pending",
+      source: "text",
+      originalText: "Потратил 50000 на обед и идея открыть кофейню",
+      counts: {
+        expenses: 1,
+        income: 0,
+        ideas: 1,
+        tasks: 0,
+        memory: 0,
+        knowledge: 0,
+        total: 2,
+      },
+      actions: [
+        {
+          type: "finance_expense",
+          index: 0,
+          payload: { amount: 50000, currency: "VND", description: "обед" },
+        },
+        {
+          type: "idea_create",
+          index: 1,
+          payload: { content: "открыть кофейню", category: "business" },
+        },
+      ],
+      groups: {
+        expenses: [
+          {
+            type: "finance_expense",
+            payload: { amount: 50000, currency: "VND", description: "обед" },
+          },
+        ],
+        income: [],
+        ideas: [
+          {
+            type: "idea_create",
+            payload: { content: "открыть кофейню", category: "business" },
+          },
+        ],
+        tasks: [],
+        memory: [],
+        knowledge: [],
+      },
+      expiresAt: Date.now() + 600_000,
+      createdAt: Date.now(),
+    };
+  },
+
+  async patchCaptureSession(
+    sessionId: string,
+    body: { actions: CaptureAction[] }
+  ): Promise<CaptureSessionDetail> {
+    await delay(80);
+    const current = await this.getCaptureSession(sessionId);
+    const actions = Array.isArray(body.actions) ? body.actions : [];
+    return {
+      ...current,
+      actions: actions.map((a, index) => ({ ...a, index })),
+      counts: {
+        ...current.counts,
+        total: actions.length,
+        expenses: actions.filter((a) => a.type === "finance_expense").length,
+        income: actions.filter((a) => a.type === "finance_income").length,
+        ideas: actions.filter((a) => a.type === "idea_create").length,
+        tasks: actions.filter(
+          (a) => a.type === "task_create" || a.type === "reminder"
+        ).length,
+        memory: actions.filter(
+          (a) => a.type === "memory_save" || a.type === "preference"
+        ).length,
+        knowledge: actions.filter((a) => a.type === "knowledge_candidate")
+          .length,
+      },
+    };
+  },
+
+  async confirmCaptureSession(sessionId: string) {
+    await delay(80);
+    void sessionId;
+    return { confirmed: true, reason: "confirmed", executedCount: 2 };
+  },
+
+  async cancelCaptureSession(sessionId: string) {
+    await delay(40);
+    void sessionId;
+    return { cancelled: true };
   },
 
   /** Test helper: reset mutable mock task state. */

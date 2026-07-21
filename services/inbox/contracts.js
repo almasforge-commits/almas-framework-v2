@@ -88,7 +88,7 @@ function firstNonEmptyString(...values) {
 export function canonicalizeActionPayload(type, payload = {}) {
   const source = payload && typeof payload === "object" ? { ...payload } : {};
 
-  if (type === "task_create" || type === "memory_save") {
+  if (type === "task_create" || type === "memory_save" || type === "idea_create") {
     const content = firstNonEmptyString(...CONTENT_ALIASES.map((key) => source[key]));
 
     if (content != null) {

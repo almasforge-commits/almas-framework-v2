@@ -4,9 +4,13 @@
  */
 
 import { classifyAnswerRouteIntent } from "../../services/answer/answerQuestionGate.js";
-import { formatTelegramAnswerReply } from "../../services/answer/formatTelegramAnswer.js";
 import { createTelegramAnswerEngineWithWorld } from "../../services/answer/telegramAnswerFactory.js";
 import { EXECUTION_NONE } from "../../services/answer/answerContracts.js";
+import {
+  MINI_APP_PATHS,
+  THIN_CONFIRM,
+  thinOpenReply,
+} from "../../config/deepLinks.js";
 
 let botPromise = null;
 
@@ -17,8 +21,8 @@ function getBot() {
   return botPromise;
 }
 
-const defaultSendMessageFn = async (chatId, text) =>
-  (await getBot()).sendMessage(chatId, text);
+const defaultSendMessageFn = async (chatId, text, extra) =>
+  (await getBot()).sendMessage(chatId, text, extra);
 
 /**
  * If the message is a genuine information question, answer via Answer Engine.
@@ -41,7 +45,6 @@ export async function maybeHandleAnswerQuestion(input = {}, options = {}) {
     /** Async or sync. Default resolves World Knowledge (default-off) then Answer Engine. */
     createEngineFn = createTelegramAnswerEngineWithWorld,
     answerEngine = null,
-    formatFn = formatTelegramAnswerReply,
     engineOverrides = {},
   } = options;
 
@@ -82,8 +85,10 @@ export async function maybeHandleAnswerQuestion(input = {}, options = {}) {
       result.execution = EXECUTION_NONE;
     }
 
-    const reply = formatFn(result);
-    await safeSend(sendMessageFn, chatId, reply);
+    const reply = thinAnswerReply(result);
+    await safeSend(sendMessageFn, chatId, reply.text, {
+      reply_markup: reply.reply_markup,
+    });
 
     return {
       handled: true,
@@ -99,12 +104,33 @@ export async function maybeHandleAnswerQuestion(input = {}, options = {}) {
   }
 }
 
-async function safeSend(sendMessageFn, chatId, text) {
+async function safeSend(sendMessageFn, chatId, text, extra) {
   try {
-    await sendMessageFn(chatId, text);
+    await sendMessageFn(chatId, text, extra);
   } catch {
     // never throw into routeText
   }
+}
+
+function thinAnswerReply(result) {
+  const answer = String(result?.answer || "").trim();
+  const found =
+    Boolean(answer) &&
+    !/^пока я этого не знаю/i.test(answer) &&
+    result?.needsClarification !== true;
+
+  if (!found) {
+    return thinOpenReply(
+      `${THIN_CONFIRM.notFound}\n\n${THIN_CONFIRM.openAlmas}`,
+      MINI_APP_PATHS.home
+    );
+  }
+
+  return thinOpenReply(
+    `${THIN_CONFIRM.found}\n\nOpen in ALMAS →`,
+    MINI_APP_PATHS.home,
+    "Open in ALMAS →"
+  );
 }
 
 /**
