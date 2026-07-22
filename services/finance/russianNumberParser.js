@@ -175,7 +175,12 @@ function tokenizeForSpokenConversion(value) {
  * @returns {string}
  */
 export function convertSpokenNumbersToDigits(text) {
-  const value = String(text ?? "");
+  // Import lazily avoided — normalize grouped digits at call sites / here via dynamic.
+  // Inline minimal normalize to avoid circular imports with financeParser.
+  const value = String(text ?? "").replace(
+    /\b(\d{1,3}(?:[\s\u00A0\u202F]\d{3})+)\b/g,
+    (match) => match.replace(/[\s\u00A0\u202F]/g, "")
+  );
   if (!value.trim()) return value;
 
   const parts = tokenizeForSpokenConversion(value);

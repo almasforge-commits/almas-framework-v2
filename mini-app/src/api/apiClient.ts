@@ -11,6 +11,7 @@ const mockClient: AlmasApiClient = {
   getInbox: () => mockApi.getInbox(),
   getFinanceSummary: (period) => mockApi.getFinanceSummary(period),
   getFinanceTransactions: (period) => mockApi.getFinanceTransactions(period),
+  getFinanceSettings: () => mockApi.getFinanceSettings(),
   getTasks: () => mockApi.getTasks(),
   patchTask: (id, patch) => mockApi.patchTask(id, patch),
   getKnowledge: () => mockApi.getKnowledge(),

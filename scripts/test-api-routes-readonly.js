@@ -109,7 +109,11 @@ async function run() {
     try {
       const res = await request(base, "/api/health");
       assert.equal(res.status, 200);
-      assert.deepEqual(res.body, { data: { ok: true } });
+      assert.equal(res.body?.data?.ok, true);
+      // supabase readiness flag is optional diagnostic metadata.
+      if ("supabase" in (res.body?.data || {})) {
+        assert.equal(typeof res.body.data.supabase, "boolean");
+      }
     } finally {
       await close();
     }

@@ -22,13 +22,20 @@ export type InformationKind =
   | "news"
   | "unknown";
 
-export type ActivityKind = "expense" | "task" | "idea" | "knowledge";
+export type ActivityKind = "expense" | "income" | "task" | "idea" | "knowledge";
+
+export type FxStatus = "ok" | "partial" | "unavailable";
 
 export interface DashboardSummary {
   greetingName: string | null;
   inboxToday: number;
   expensesToday: number;
   expensesTodayCurrency: string;
+  incomeToday?: number;
+  balanceToday?: number;
+  baseCurrency?: string;
+  fxStatus?: FxStatus;
+  ratesUpdatedAt?: string | null;
   activeTasks: number;
   newKnowledge: number;
   statusLabel: string;
@@ -62,6 +69,12 @@ export interface InboxItem {
 
 export type FinancePeriod = "today" | "week" | "month";
 
+export interface OriginalCurrencyTotal {
+  currency: string;
+  income: number;
+  expense: number;
+}
+
 export interface FinanceSummary {
   balance: number;
   incomeMonth: number;
@@ -69,6 +82,19 @@ export interface FinanceSummary {
   currency: string;
   period: FinancePeriod;
   demo: boolean;
+  baseCurrency?: string;
+  incomeBase?: number | null;
+  expenseBase?: number | null;
+  balanceBase?: number | null;
+  originalCurrencyTotals?: OriginalCurrencyTotal[];
+  fxStatus?: FxStatus;
+  ratesUpdatedAt?: string | null;
+}
+
+export interface FinanceSettings {
+  baseCurrency: string;
+  source: string;
+  convertible: boolean;
 }
 
 export interface FinanceTransaction {
@@ -170,6 +196,7 @@ export interface AlmasApiClient {
   getInbox(): Promise<InboxItem[]>;
   getFinanceSummary(period: FinancePeriod): Promise<FinanceSummary>;
   getFinanceTransactions(period: FinancePeriod): Promise<FinanceTransaction[]>;
+  getFinanceSettings(): Promise<FinanceSettings>;
   getTasks(): Promise<Task[]>;
   patchTask(id: string, patch: { completed: boolean }): Promise<Task | null>;
   getKnowledge(): Promise<KnowledgeItem[]>;

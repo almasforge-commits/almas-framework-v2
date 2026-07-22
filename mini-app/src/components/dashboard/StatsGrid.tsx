@@ -3,7 +3,11 @@ import type { DashboardSummary } from "../../api/apiTypes";
 import { DashboardCard } from "./DashboardCard";
 
 function formatExpenses(summary: DashboardSummary): string {
-  return `${summary.expensesToday.toLocaleString("ru-RU")} ${summary.expensesTodayCurrency}`;
+  const currency = summary.baseCurrency || summary.expensesTodayCurrency;
+  const value = `${summary.expensesToday.toLocaleString("ru-RU")} ${currency}`;
+  if (summary.fxStatus === "partial") return `${value} · частично`;
+  if (summary.fxStatus === "unavailable") return `${value} · без курса`;
+  return value;
 }
 
 export const StatsGrid = memo(function StatsGrid({
@@ -16,9 +20,14 @@ export const StatsGrid = memo(function StatsGrid({
       {
         key: "expenses",
         icon: "💰",
-        title: "Расходы сегодня",
+        title: `Расходы в ${summary.baseCurrency || summary.expensesTodayCurrency}`,
         value: formatExpenses(summary),
-        subtitle: "За текущий день",
+        subtitle:
+          summary.fxStatus === "unavailable"
+            ? "Курсы недоступны"
+            : summary.fxStatus === "partial"
+              ? "Часть валют без курса"
+              : "За текущий день",
         to: "/finance",
         ariaLabel: `Расходы сегодня: ${formatExpenses(summary)}`,
       },

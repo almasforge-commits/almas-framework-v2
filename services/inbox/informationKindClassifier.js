@@ -2,6 +2,7 @@ import { validateInformationKinds } from "./inboxContracts.js";
 import { isMenuNavigationCommand } from "../../core/utils/menuNavigationCommands.js";
 import { isMeaninglessShortInput } from "../../core/utils/isMeaninglessShortInput.js";
 import { normalizeUserText } from "../../core/utils/normalizeUserText.js";
+import { looksLikeFinanceAttempt } from "../finance/financeParser.js";
 
 // Pure information-kind classifier. Maps AI action types + conservative
 // deterministic hints. Never executes domain actions. No OpenAI /
@@ -98,6 +99,11 @@ export function classifyInformationKinds(input = {}) {
   }
 
   if (text) {
+    // Finance attempt beats free-text idea heuristics for the same utterance.
+    if (looksLikeFinanceAttempt(text)) {
+      pushUnique(kinds, seen, "finance", "hint:finance", reasons);
+    }
+
     if (IDEA_PATTERNS.some((re) => re.test(text))) {
       pushUnique(kinds, seen, "idea", "hint:idea", reasons);
     }
@@ -116,10 +122,20 @@ export function classifyInformationKinds(input = {}) {
   }
 
   // Drop trailing "unknown" if any real kind was identified.
-  const filtered = kinds.filter((kind, index) => {
+  let filtered = kinds.filter((kind, index) => {
     if (kind !== "unknown") return true;
     return kinds.length === 1 && index === 0;
   });
+
+  // Confirmed / detected finance must not surface as Idea-only.
+  if (filtered.includes("finance") && filtered.includes("idea")) {
+    filtered = filtered.filter((kind) => kind !== "idea");
+  }
+
+  // Prefer finance first for activity domain mapping.
+  if (filtered.includes("finance") && filtered[0] !== "finance") {
+    filtered = ["finance", ...filtered.filter((k) => k !== "finance")];
+  }
 
   return {
     informationKinds: validateInformationKinds(filtered.length ? filtered : ["unknown"]),

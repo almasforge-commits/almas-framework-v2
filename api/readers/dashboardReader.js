@@ -2,6 +2,11 @@
  * Dashboard aggregates ONLY already-scoped reader results.
  * Never calls unscoped domain services directly.
  */
+import {
+  activityDomainLabel,
+  resolveActivityDomain,
+} from "../mappers/activityDomain.js";
+
 export function createDashboardReader(deps = {}) {
   const financeReader = deps.financeReader;
   const inboxReader = deps.inboxReader;
@@ -26,17 +31,19 @@ export function createDashboardReader(deps = {}) {
       const expensesTodayPayload = await financeReader.getSummary(actor, "today");
       const txToday = await financeReader.getTransactions(actor, {
         period: "today",
-        limit: 3,
+        limit: 5,
         offset: 0,
       });
 
       const todayActivity = [];
       for (const tx of txToday.items) {
         todayActivity.push({
-          id: `exp-${tx.id}`,
-          kind: "expense",
-          title: `${tx.type === "income" ? "Доход" : "Расход"} ${tx.amount} ${tx.currency}`,
-          subtitle: tx.category || tx.description || "",
+          id: `fin-${tx.id}`,
+          kind: tx.type === "income" ? "income" : "expense",
+          title: `${tx.type === "income" ? "Доход" : "Расход"} ${Number(
+            tx.amount
+          ).toLocaleString("ru-RU")} ${tx.currency}`,
+          subtitle: tx.category || tx.description || "Финансы",
           time: tx.date === todayIso ? "" : tx.date,
         });
       }
@@ -49,16 +56,20 @@ export function createDashboardReader(deps = {}) {
           time: "",
         });
       }
-      for (const item of inbox.slice(0, 2)) {
-        if (item.informationKinds.includes("idea")) {
-          todayActivity.push({
-            id: `idea-${item.id}`,
-            kind: "idea",
-            title: item.originalText.slice(0, 80),
-            subtitle: "Идея",
-            time: item.time,
-          });
-        }
+      for (const item of inbox.slice(0, 4)) {
+        const domain = resolveActivityDomain(item.informationKinds, {
+          executionSummary: item.executionSummary,
+          originalText: item.originalText,
+        });
+        // Skip inbox finance rows when we already have transaction cards.
+        if (domain === "expense" || domain === "income") continue;
+        todayActivity.push({
+          id: `inbox-${item.id}`,
+          kind: domain === "memory" ? "idea" : domain,
+          title: String(item.originalText || "").slice(0, 80),
+          subtitle: activityDomainLabel(domain),
+          time: item.time,
+        });
       }
       for (const item of knowledge.slice(0, 2)) {
         todayActivity.push({
@@ -70,26 +81,56 @@ export function createDashboardReader(deps = {}) {
         });
       }
 
-      const recentActions = inbox.slice(0, 5).map((item) => ({
-        id: `act-${item.id}`,
-        kind: item.informationKinds.includes("finance")
-          ? "expense"
-          : item.informationKinds.includes("task")
-            ? "task"
-            : item.informationKinds.includes("knowledge")
-              ? "knowledge"
-              : "idea",
-        title: item.originalText.slice(0, 80) || item.status,
-        subtitle: item.status,
-        time: item.time,
-      }));
+      const recentActions = inbox.slice(0, 8).map((item) => {
+        const domain = resolveActivityDomain(item.informationKinds, {
+          executionSummary: item.executionSummary,
+          originalText: item.originalText,
+        });
+        const kind =
+          domain === "income"
+            ? "income"
+            : domain === "expense"
+              ? "expense"
+              : domain === "task"
+                ? "task"
+                : domain === "knowledge"
+                  ? "knowledge"
+                  : "idea";
+        return {
+          id: `act-${item.id}`,
+          kind,
+          title: item.originalText.slice(0, 80) || item.status,
+          subtitle: activityDomainLabel(domain),
+          time: item.time,
+        };
+      });
+
+      const baseCurrency =
+        expensesTodayPayload.baseCurrency ||
+        expensesTodayPayload.currency ||
+        "VND";
+      const expensesToday =
+        typeof expensesTodayPayload.expenseBase === "number"
+          ? expensesTodayPayload.expenseBase
+          : expensesTodayPayload.expensesMonth || 0;
 
       return {
         summary: {
           greetingName: actor.firstName || null,
           inboxToday: inbox.length,
-          expensesToday: expensesTodayPayload.expensesMonth || 0,
-          expensesTodayCurrency: expensesTodayPayload.currency || "VND",
+          expensesToday,
+          expensesTodayCurrency: baseCurrency,
+          incomeToday:
+            typeof expensesTodayPayload.incomeBase === "number"
+              ? expensesTodayPayload.incomeBase
+              : expensesTodayPayload.incomeMonth || 0,
+          balanceToday:
+            typeof expensesTodayPayload.balanceBase === "number"
+              ? expensesTodayPayload.balanceBase
+              : expensesTodayPayload.balance || 0,
+          baseCurrency,
+          fxStatus: expensesTodayPayload.fxStatus || "ok",
+          ratesUpdatedAt: expensesTodayPayload.ratesUpdatedAt || null,
           activeTasks: tasks.filter((t) => !t.completed).length,
           newKnowledge: knowledge.length,
           statusLabel: "Live",
@@ -98,6 +139,7 @@ export function createDashboardReader(deps = {}) {
         recentTasks: tasks.slice(0, 5),
         recentKnowledge: knowledge.slice(0, 5),
         recentActions,
+        financeSummary,
       };
     },
   };

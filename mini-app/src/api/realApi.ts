@@ -4,6 +4,7 @@ import type {
   CaptureConfirmResult,
   CaptureSessionDetail,
   FinancePeriod,
+  FinanceSettings,
   FinanceSummary,
   FinanceTransaction,
   HomePayload,
@@ -63,6 +64,10 @@ export function createRealApi(deps: Partial<LiveHttpDeps> = {}): AlmasApiClient 
         httpDeps
       );
       return assertArray<FinanceTransaction>(data, "transactions");
+    },
+
+    async getFinanceSettings(): Promise<FinanceSettings> {
+      return liveGetJson<FinanceSettings>("/api/finance/settings", httpDeps);
     },
 
     async getTasks(): Promise<Task[]> {

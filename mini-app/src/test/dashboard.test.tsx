@@ -16,6 +16,8 @@ const summary: DashboardSummary = {
   inboxToday: 4,
   expensesToday: 186000,
   expensesTodayCurrency: "VND",
+  baseCurrency: "VND",
+  fxStatus: "ok",
   activeTasks: 3,
   newKnowledge: 2,
   statusLabel: "Демо-режим",
@@ -36,7 +38,7 @@ describe("dashboard UI helpers", () => {
       </MemoryRouter>
     );
     expect(screen.getByTestId("dashboard-stats")).toBeInTheDocument();
-    expect(screen.getByText("Расходы сегодня")).toBeInTheDocument();
+    expect(screen.getByText("Расходы в VND")).toBeInTheDocument();
     expect(screen.getByText("Активные задачи")).toBeInTheDocument();
     expect(screen.getByText("Знания")).toBeInTheDocument();
     expect(screen.getByText("Идеи")).toBeInTheDocument();

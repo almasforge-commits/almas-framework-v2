@@ -63,6 +63,15 @@ export function buildDefaultApp(env = process.env) {
   const financeReader = createFinanceReader({
     // Production path: financeStore → finance_transactions (same as bot writes).
     log: (line) => console.error(String(line)),
+    getBaseCurrencyPreferenceFn: async (actor) => {
+      const { loadActorBaseCurrencyPreference } = await import(
+        "../services/fx/actorFinanceSettings.js"
+      );
+      return loadActorBaseCurrencyPreference(actor);
+    },
+    fxProviderOptions: {
+      provider: process.env.FX_PROVIDER || "none",
+    },
   });
 
   const inboxReader = createInboxReader({

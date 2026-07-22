@@ -6,6 +6,11 @@
 import { executeCaptureBatch } from "./captureBatchExecutor.js";
 import { formatCaptureDraftDetail } from "./capturePreview.js";
 import { defaultCaptureSessionStore } from "./captureSessionStore.js";
+import {
+  listCaptureFinanceValidationErrors,
+  validateCaptureDraft,
+} from "./validateCaptureDraft.js";
+import { createCaptureDraft } from "./captureContracts.js";
 
 /**
  * Replace draft actions for a pending session (actor-scoped by id).
@@ -49,9 +54,18 @@ export async function patchCaptureSessionActions(
       content: a.content,
     }));
 
+  const validated = validateCaptureDraft(
+    createCaptureDraft({
+      actions: nextActions,
+      sourceTier: session.draft?.sourceTier || "deterministic",
+      language: session.draft?.language || "ru",
+    }),
+    { log: (line) => console.log(line) }
+  );
+
   const draft = {
     ...(session.draft || {}),
-    actions: nextActions,
+    actions: validated.draft.actions,
     source: session.draft?.source || "mini_app_edit",
   };
 
@@ -92,14 +106,36 @@ export async function confirmCaptureSessionById(
     typeof store.ensureLoaded === "function"
       ? await store.ensureLoaded(sessionId, actorKey)
       : store.getById(sessionId, actorKey);
-  if (!session) return { ok: false, reason: "not_found" };
+  if (!session) {
+    // Idempotent confirm after clear: treat known executed ids as success.
+    if (store.hasExecuted?.(sessionId)) {
+      return { ok: true, reason: "already_executed", executedCount: 0 };
+    }
+    return { ok: false, reason: "not_found" };
+  }
+
+  if (store.hasExecuted(session.id)) {
+    if (session.status === "pending" || session.status === "editing") {
+      await store.clear(session.actorKey, session.chatId, "confirmed");
+    }
+    return { ok: true, reason: "already_executed", executedCount: 0 };
+  }
+
   if (session.status !== "pending" && session.status !== "editing") {
     return { ok: false, reason: "not_pending", status: session.status };
   }
 
-  if (store.hasExecuted(session.id)) {
-    await store.clear(session.actorKey, session.chatId, "confirmed");
-    return { ok: true, reason: "already_executed", executedCount: 0 };
+  const draftActions = Array.isArray(session?.draft?.actions)
+    ? session.draft.actions
+    : [];
+  const validationErrors = listCaptureFinanceValidationErrors(draftActions);
+  if (validationErrors.length > 0) {
+    return {
+      ok: false,
+      reason: "validation_failed",
+      validationErrors,
+      executedCount: 0,
+    };
   }
 
   const execution = await executeFn(

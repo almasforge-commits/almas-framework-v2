@@ -79,20 +79,69 @@ export function FinancePage() {
         {summary && !loading && !errorUi ? (
           <div className="grid grid-cols-1 gap-3">
             <MetricCard
-              label="Текущий баланс"
-              value={`${summary.balance.toLocaleString("ru-RU")} ${summary.currency}`}
-              hint={summary.demo ? "Демо" : undefined}
+              label={`Баланс в ${summary.baseCurrency || summary.currency}`}
+              value={
+                summary.fxStatus === "unavailable" && summary.balanceBase == null
+                  ? "Курсы недоступны"
+                  : `${(summary.balanceBase ?? summary.balance).toLocaleString("ru-RU")} ${summary.baseCurrency || summary.currency}`
+              }
+              hint={
+                summary.fxStatus === "partial"
+                  ? "Частичная конвертация"
+                  : summary.fxStatus === "unavailable"
+                    ? "Показаны исходные валюты ниже"
+                    : summary.demo
+                      ? "Демо"
+                      : undefined
+              }
             />
             <div className="grid grid-cols-2 gap-3">
               <MetricCard
-                label="Доход"
-                value={`${summary.incomeMonth.toLocaleString("ru-RU")} ${summary.currency}`}
+                label={`Общий доход`}
+                value={
+                  summary.incomeBase == null && summary.fxStatus === "unavailable"
+                    ? "—"
+                    : `${(summary.incomeBase ?? summary.incomeMonth).toLocaleString("ru-RU")} ${summary.baseCurrency || summary.currency}`
+                }
               />
               <MetricCard
-                label="Расход"
-                value={`${summary.expensesMonth.toLocaleString("ru-RU")} ${summary.currency}`}
+                label={`Общий расход`}
+                value={
+                  summary.expenseBase == null && summary.fxStatus === "unavailable"
+                    ? "—"
+                    : `${(summary.expenseBase ?? summary.expensesMonth).toLocaleString("ru-RU")} ${summary.baseCurrency || summary.currency}`
+                }
               />
             </div>
+            {summary.originalCurrencyTotals &&
+            summary.originalCurrencyTotals.length > 0 ? (
+              <SectionCard title="В том числе">
+                <ul className="space-y-1 text-sm text-tg-hint">
+                  {summary.originalCurrencyTotals.map((row) => (
+                    <li key={row.currency}>
+                      {row.income
+                        ? `Доход ${row.income.toLocaleString("ru-RU")} ${row.currency}`
+                        : null}
+                      {row.income && row.expense ? " · " : null}
+                      {row.expense
+                        ? `Расход ${row.expense.toLocaleString("ru-RU")} ${row.currency}`
+                        : null}
+                    </li>
+                  ))}
+                </ul>
+                {summary.ratesUpdatedAt ? (
+                  <p className="mt-2 text-xs text-tg-hint">
+                    Курс обновлён:{" "}
+                    {new Date(summary.ratesUpdatedAt).toLocaleString("ru-RU")}
+                  </p>
+                ) : null}
+                {summary.fxStatus && summary.fxStatus !== "ok" ? (
+                  <p className="mt-1 text-xs text-tg-hint">
+                    FX: {summary.fxStatus}
+                  </p>
+                ) : null}
+              </SectionCard>
+            ) : null}
           </div>
         ) : null}
 

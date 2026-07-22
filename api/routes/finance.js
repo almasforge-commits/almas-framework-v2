@@ -31,5 +31,22 @@ export function createFinanceRouter(deps) {
     })
   );
 
+  // Future-friendly settings hook (read-only preference resolution).
+  router.get(
+    "/settings",
+    asyncHandler(async (req, res) => {
+      if (typeof deps.financeReader.getSettings !== "function") {
+        sendData(res, {
+          baseCurrency: "VND",
+          source: "default",
+          convertible: true,
+        });
+        return;
+      }
+      const settings = await deps.financeReader.getSettings(req.actor);
+      sendData(res, settings);
+    })
+  );
+
   return router;
 }

@@ -3,6 +3,7 @@ import type { ActivityItem, ActivityKind } from "../../api/apiTypes";
 
 const KIND_ICON: Record<ActivityKind, string> = {
   expense: "💸",
+  income: "💵",
   task: "✅",
   idea: "💡",
   knowledge: "📚",
@@ -10,6 +11,7 @@ const KIND_ICON: Record<ActivityKind, string> = {
 
 const KIND_BADGE: Record<ActivityKind, string> = {
   expense: "Финансы",
+  income: "Финансы",
   task: "Задача",
   idea: "Идея",
   knowledge: "Знание",

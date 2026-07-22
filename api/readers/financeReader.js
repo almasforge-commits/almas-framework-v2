@@ -1,6 +1,7 @@
 import {
   mapFinanceSummary,
   mapFinanceTransaction,
+  mapFinanceSettings,
 } from "../mappers/financeMapper.js";
 import { HttpError } from "../httpErrors.js";
 import {
@@ -10,6 +11,9 @@ import {
   listFinanceTransactionsForUser,
   sanitizeFinanceErrorMessage,
 } from "../../services/finance/financeStore.js";
+import { aggregateFinanceInBase } from "../../services/fx/aggregateFinance.js";
+import { resolveBaseCurrency } from "../../services/fx/resolveBaseCurrency.js";
+import { createFxProviderFromEnv } from "../../services/fx/fxProvider.js";
 
 function periodToDays(period) {
   if (period === "today") return 1;
@@ -65,10 +69,12 @@ export function createFinanceReader(deps = {}) {
       ? deps.listRowsFn
       : listFinanceTransactionsForUser;
   const log = deps.log;
+  const fxProvider =
+    deps.fxProvider || createFxProviderFromEnv(deps.fxProviderOptions || {});
+  const resolveBaseCurrencyFn =
+    deps.resolveBaseCurrencyFn || resolveBaseCurrency;
+  const getBaseCurrencyPreferenceFn = deps.getBaseCurrencyPreferenceFn;
 
-  // Legacy injectable adapters (unit tests / older wiring).
-  // Prefer explicit listRowsFn; otherwise use legacy only when getHistoryFn
-  // was provided without listRowsFn.
   const getBalanceFn = deps.getBalanceFn;
   const getHistoryFn = deps.getHistoryFn;
   const getExpensesByPeriodFn = deps.getExpensesByPeriodFn;
@@ -102,7 +108,7 @@ export function createFinanceReader(deps = {}) {
     });
   }
 
-  function summarize(rows, period) {
+  async function summarize(rows, period, actor) {
     try {
       const balances = {};
       for (const row of rows) {
@@ -117,25 +123,49 @@ export function createFinanceReader(deps = {}) {
           balances[currency].income - balances[currency].expense;
       }
 
-      const currency =
-        Object.keys(balances)[0] ||
-        (rows[0] && String(rows[0].currency || "VND")) ||
-        "VND";
+      const baseCurrency = await resolveBaseCurrencyFn(actor, {
+        getPreferenceFn: getBaseCurrencyPreferenceFn,
+        profileBaseCurrency: deps.profileBaseCurrency,
+      });
+
+      const fx = await aggregateFinanceInBase(rows, {
+        baseCurrency,
+        getRate: (from, to, at) => fxProvider.getRate(from, to, at),
+        log: (line) => {
+          if (typeof log === "function") log(line);
+          else console.error(line);
+        },
+      });
 
       let incomeMonth = 0;
       let expensesMonth = 0;
+      const legacyCurrency = balances[baseCurrency]
+        ? baseCurrency
+        : Object.keys(balances)[0] || baseCurrency;
       for (const row of rows) {
-        if (row.currency && String(row.currency) !== currency) continue;
+        if (String(row.currency || "VND") !== legacyCurrency) continue;
         if (row.type === "income") incomeMonth += Number(row.amount) || 0;
         if (row.type === "expense") expensesMonth += Number(row.amount) || 0;
       }
 
       return mapFinanceSummary({
         balances,
-        incomeMonth,
-        expensesMonth,
+        incomeMonth:
+          fx.fxStatus === "unavailable" ? incomeMonth : fx.incomeBase ?? incomeMonth,
+        expensesMonth:
+          fx.fxStatus === "unavailable"
+            ? expensesMonth
+            : fx.expenseBase ?? expensesMonth,
         period,
-        currency,
+        currency: baseCurrency,
+        baseCurrency: fx.baseCurrency,
+        incomeBase: fx.incomeBase,
+        expenseBase: fx.expenseBase,
+        balanceBase: fx.balanceBase,
+        originalCurrencyTotals: fx.originalCurrencyTotals,
+        fxStatus: fx.fxStatus,
+        ratesUpdatedAt: fx.ratesUpdatedAt,
+        ratesUsed: fx.ratesUsed,
       });
     } catch (error) {
       throw new FinanceStoreError(
@@ -147,6 +177,17 @@ export function createFinanceReader(deps = {}) {
   }
 
   return {
+    async getSettings(actor) {
+      const baseCurrency = await resolveBaseCurrencyFn(actor, {
+        getPreferenceFn: getBaseCurrencyPreferenceFn,
+        profileBaseCurrency: deps.profileBaseCurrency,
+      });
+      return mapFinanceSettings({
+        baseCurrency,
+        source: getBaseCurrencyPreferenceFn ? "preference_or_default" : "default",
+      });
+    },
+
     async getSummary(actor, period = "month") {
       const status = getFinanceSupabaseStatus();
       let userId = null;
@@ -164,16 +205,11 @@ export function createFinanceReader(deps = {}) {
         });
 
         if (useLegacy) {
-          const balances = (await getBalanceFn(userId)) || {};
           const days = periodToDays(period);
           const expensesByCurrency =
             (await getExpensesByPeriodFn(userId, days)) || {};
           const stats =
             (await getStatisticsFn(userId)) || { incomes: {}, expenses: {} };
-          const currency =
-            Object.keys(balances)[0] ||
-            Object.keys(expensesByCurrency)[0] ||
-            "VND";
           const history = (await getHistoryFn(userId, 200)) || [];
           const from = startOfPeriod(period);
           const inPeriod = (Array.isArray(history) ? history : []).filter(
@@ -184,39 +220,38 @@ export function createFinanceReader(deps = {}) {
               );
             }
           );
-          let incomeMonth = 0;
-          let expensesMonth = 0;
-          for (const row of inPeriod) {
-            if (row.currency && row.currency !== currency) continue;
-            if (row.type === "income") incomeMonth += Number(row.amount) || 0;
-            if (row.type === "expense") expensesMonth += Number(row.amount) || 0;
-          }
-          if (inPeriod.length === 0) {
-            expensesMonth = Number(expensesByCurrency[currency]) || 0;
-            incomeMonth = Number(stats.incomes?.[currency]) || 0;
-            if (period === "today") incomeMonth = 0;
-            if (period === "week") {
-              incomeMonth = Math.round(incomeMonth * (7 / 30));
-            }
-          }
-          const summary = mapFinanceSummary({
-            balances,
-            incomeMonth,
-            expensesMonth,
-            period,
-            currency,
-          });
+          const summaryRows =
+            inPeriod.length > 0
+              ? inPeriod
+              : [
+                  ...Object.entries(expensesByCurrency).map(([currency, amount]) => ({
+                    type: "expense",
+                    amount: Number(amount) || 0,
+                    currency,
+                  })),
+                  ...Object.entries(stats.incomes || {}).map(([currency, amount]) => ({
+                    type: "income",
+                    amount:
+                      period === "today"
+                        ? 0
+                        : period === "week"
+                          ? Math.round((Number(amount) || 0) * (7 / 30))
+                          : Number(amount) || 0,
+                    currency,
+                  })),
+                ];
+          const summary = await summarize(summaryRows, period, actor);
           logFinanceDiag(log, {
             operation: "summary",
             queryOk: true,
-            rowCount: inPeriod.length,
+            rowCount: summaryRows.length,
             errorCode: "none",
           });
           return summary;
         }
 
         const rows = await loadRows(userId, period, 500);
-        const summary = summarize(rows, period);
+        const summary = await summarize(rows, period, actor);
         logFinanceDiag(log, {
           operation: "summary",
           queryOk: true,

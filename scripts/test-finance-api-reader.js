@@ -135,6 +135,14 @@ async function run() {
       currency: "VND",
       period: "month",
       demo: false,
+      baseCurrency: "VND",
+      incomeBase: 0,
+      expenseBase: 0,
+      balanceBase: 0,
+      originalCurrencyTotals: [],
+      fxStatus: "ok",
+      ratesUpdatedAt: null,
+      ratesUsed: [],
     });
     const tx = await reader.getTransactions(
       { userId: "7", telegramUserId: 7 },

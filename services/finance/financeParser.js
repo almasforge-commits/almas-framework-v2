@@ -1,6 +1,11 @@
 import { detectCategory } from "./categorizer.js";
 import { convertSpokenNumbersToDigits } from "./russianNumberParser.js";
 import { stripTrailingActionClause } from "../../core/utils/stripTrailingActionClause.js";
+import {
+  cleanFinanceDescription,
+  detectExplicitCurrency,
+  normalizeGroupedDigits,
+} from "./financeTextNormalize.js";
 
 const EXPENSE_WORDS = [
   "расход",
@@ -109,6 +114,26 @@ const INCOME_KEYWORDS = [
   "заказ",
 ];
 
+/** Keywords that need an amount nearby — bare "проект …" is not finance. */
+const AMBIGUOUS_INCOME_KEYWORDS = new Set(["проект", "заказ", "фриланс"]);
+
+function hasAmountSignal(text) {
+  const lower = String(text || "");
+  return (
+    /(\d+(?:[.,]\d+)?)\s*(тысячи|тысяч|тыс|миллионов|миллиона|миллион|млн|k|к)(?![a-zа-яё])/iu.test(
+      lower
+    ) ||
+    /(\d+(?:[.,]\d+)?)\s*(vnd|usd|eur|rub|kzt|донг|доллар|тенге|руб|евро)/iu.test(
+      lower
+    ) ||
+    /\d{2,}/.test(lower) ||
+    (/\b(тысяч|тысячи|тысяча|миллион(?:а|ов)?)\b/iu.test(lower) &&
+      /(\d+|один|два|три|четыре|пять|шесть|семь|восемь|девять|десять|двадцать|тридцать|сорок|пятьдесят|сто)/iu.test(
+        lower
+      ))
+  );
+}
+
 /** Leading context that must not block finance verb detection. */
 const LEADING_CONTEXT_RE =
   /^(сегодня|вчера|завтра|утром|вечером|днём|днем|ночью|только что|сейчас|кстати|слушай|ну)\s+/giu;
@@ -174,13 +199,15 @@ export function parseFinanceMessage(text = "") {
 
   const original = text.trim();
 
-  const convertedOriginal = convertSpokenNumbersToDigits(original);
+  // Space-grouped money first ("75 000" → 75000), then spoken words.
+  const grouped = normalizeGroupedDigits(original);
+  const convertedOriginal = convertSpokenNumbersToDigits(grouped);
   const lower = convertedOriginal.toLowerCase();
 
   const type = detectFinanceType(lower);
   if (!type) return null;
 
-  const currency = detectCurrency(lower);
+  const currency = detectExplicitCurrency(lower) || "VND";
 
   const amountMatch = lower.match(
     /(\d+(?:[.,]\d+)?)(?:\s*(тысячи|тысяч|тыс|миллионов|миллиона|миллион|млн)(?![a-zа-яё])|\s*([kкм])(?![a-zа-яё]))?/iu
@@ -192,6 +219,7 @@ export function parseFinanceMessage(text = "") {
     amountMatch[1],
     amountMatch[2] || amountMatch[3] || ""
   );
+  if (!Number.isFinite(amount) || amount <= 0) return null;
 
   let description = convertedOriginal;
 
@@ -200,25 +228,15 @@ export function parseFinanceMessage(text = "") {
   });
 
   description = description.replace(amountMatch[0], "");
-
-  description = description
-    .replace(/донг(?:ов|а)?/gi, "")
-    .replace(/тенге/gi, "")
-    .replace(/доллар(?:ов|а)?/gi, "")
-    .replace(/usd|vnd|kzt|rub|eur/gi, "")
-    .replace(/[₫₸$€₽]/g, "")
-    .replace(
-      /^(сегодня|вчера|завтра|утром|вечером|днём|днем|ночью|только что|сейчас)\s+/giu,
-      ""
-    )
-    .replace(/(^|\s+)(за|на|в|во|по)(\s+|$)/gi, " ")
-    .replace(/[-–—:,.]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
+  description = cleanFinanceDescription(description);
   description = stripTrailingActionClause(description);
 
   if (!description) {
+    description = "";
+  }
+
+  // Never surface internal type names as descriptions.
+  if (/^finance_(expense|income)$/i.test(description)) {
     description = "";
   }
 
@@ -240,8 +258,17 @@ export function looksLikeFinanceAttempt(text = "") {
 
   if (
     EXPENSE_WORDS.some((v) => lower.startsWith(v)) ||
-    INCOME_WORDS.some((v) => lower.startsWith(v)) ||
-    INCOME_KEYWORDS.some((v) => lower.startsWith(v))
+    INCOME_WORDS.some((v) => lower.startsWith(v))
+  ) {
+    return true;
+  }
+
+  if (
+    INCOME_KEYWORDS.some((v) => {
+      if (!lower.startsWith(v)) return false;
+      if (AMBIGUOUS_INCOME_KEYWORDS.has(v)) return hasAmountSignal(lower);
+      return true;
+    })
   ) {
     return true;
   }
@@ -307,28 +334,4 @@ function parseAmount(number, suffix = "") {
   }
 
   return Math.round(value);
-}
-
-function detectCurrency(text) {
-  if (/донг|донга|донгов|vnd|₫/i.test(text)) {
-    return "VND";
-  }
-
-  if (/тенге|kzt|₸/i.test(text)) {
-    return "KZT";
-  }
-
-  if (/usd|доллар|\$/i.test(text)) {
-    return "USD";
-  }
-
-  if (/eur|евро|€/i.test(text)) {
-    return "EUR";
-  }
-
-  if (/rub|руб|₽/i.test(text)) {
-    return "RUB";
-  }
-
-  return "VND";
 }

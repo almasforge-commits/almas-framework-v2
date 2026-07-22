@@ -77,6 +77,14 @@ export function createCaptureRouter(deps) {
       });
 
       if (!result.ok) {
+        if (result.reason === "validation_failed") {
+          throw new HttpError(
+            400,
+            "validation_failed",
+            (result.validationErrors || []).join(". ") ||
+              "Capture draft validation failed"
+          );
+        }
         const status =
           result.reason === "not_found"
             ? 404

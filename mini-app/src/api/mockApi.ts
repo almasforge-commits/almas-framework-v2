@@ -2,6 +2,7 @@ import type {
   CaptureAction,
   CaptureSessionDetail,
   FinancePeriod,
+  FinanceSettings,
   FinanceSummary,
   FinanceTransaction,
   HomePayload,
@@ -25,6 +26,10 @@ const HOME: HomePayload = {
     inboxToday: 4,
     expensesToday: 186_000,
     expensesTodayCurrency: "VND",
+    baseCurrency: "VND",
+    fxStatus: "ok",
+    incomeToday: 0,
+    balanceToday: 0,
     activeTasks: 3,
     newKnowledge: 2,
     statusLabel: "Демо-режим",
@@ -332,6 +337,28 @@ export const mockApi = {
       currency: "VND",
       period,
       demo: true,
+      baseCurrency: "VND",
+      incomeBase: Math.round(5_000_000 * factor),
+      expenseBase: Math.round(1_240_000 * factor),
+      balanceBase: 12_450_000,
+      originalCurrencyTotals: [
+        {
+          currency: "VND",
+          income: Math.round(5_000_000 * factor),
+          expense: Math.round(1_240_000 * factor),
+        },
+      ],
+      fxStatus: "ok",
+      ratesUpdatedAt: null,
+    };
+  },
+
+  async getFinanceSettings(): Promise<FinanceSettings> {
+    await delay(40);
+    return {
+      baseCurrency: "VND",
+      source: "default",
+      convertible: true,
     };
   },
 

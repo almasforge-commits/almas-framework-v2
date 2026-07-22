@@ -21,6 +21,7 @@ import {
   dedupeSegments,
   splitSemanticSegments,
 } from "./captureTranscript.js";
+import { validateCaptureDraft } from "./validateCaptureDraft.js";
 
 /**
  * Map a universal-extraction item → capture action.
@@ -367,11 +368,18 @@ export function buildDeterministicCaptureDraft(text) {
     }
   }
 
-  return createCaptureDraft({
+  const draft = createCaptureDraft({
     actions,
     sourceTier: "deterministic",
     language: "ru",
   });
+  const financeCount = actions.filter(
+    (a) => a.type === "finance_expense" || a.type === "finance_income"
+  ).length;
+  console.log(`[capture] deterministicFinance=${financeCount}`);
+  return validateCaptureDraft(draft, {
+    log: (line) => console.log(line),
+  }).draft;
 }
 
 function stripLeadingConjunction(segment) {
@@ -427,14 +435,32 @@ export async function buildCaptureDraft(text, options = {}) {
 
     if (!fromAi.length) return deterministic;
 
+    const aiFinance = fromAi.filter(
+      (a) => a.type === "finance_expense" || a.type === "finance_income"
+    ).length;
+    console.log(`[capture] aiFinance=${aiFinance}`);
+
     // Prefer richer AI split when it finds more (or equal with finance detail).
-    const merged = createCaptureDraft({
+    // Never append duplicate finance from the same amount/identity.
+    const mergedRaw = createCaptureDraft({
       actions: mergeActions(deterministic.actions, fromAi),
       sourceTier: extraction?.tier || "mixed",
       language: extraction?.language || deterministic.language,
       truncated: Boolean(extraction?.truncated),
     });
-    return merged;
+    const validated = validateCaptureDraft(mergedRaw, {
+      log: (line) => console.log(line),
+    });
+    const mergedFinance = validated.draft.actions.filter(
+      (a) => a.type === "finance_expense" || a.type === "finance_income"
+    ).length;
+    console.log(`[capture] mergedFinance=${mergedFinance}`);
+    if (validated.removedDuplicates > 0) {
+      console.log(
+        `[capture] removedDuplicates=${validated.removedDuplicates}`
+      );
+    }
+    return validated.draft;
   } catch (error) {
     console.error("[capture] universal extraction failed:", error?.message || error);
     return deterministic;
