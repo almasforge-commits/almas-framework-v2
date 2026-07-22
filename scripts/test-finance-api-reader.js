@@ -81,7 +81,7 @@ async function run() {
       SUPABASE_ANON_KEY: "",
     });
     assert.equal(missing.ok, false);
-    assert.equal(missing.code, "missing_supabase_config");
+    assert.equal(missing.code, "missing_url");
   });
 
   await test("2. missing supabase config fails safely via listRows", async () => {

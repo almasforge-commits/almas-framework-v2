@@ -18,7 +18,12 @@ import {
   botTokenFingerprint,
   normalizeBotToken,
 } from "./auth/validateInitData.js";
-import { logSupabaseStartupDiagnostics } from "../providers/storage/supabase.js";
+import {
+  getSupabaseClient,
+  isSupabaseReady,
+  logSupabaseStartupDiagnostics,
+  supabaseStatus,
+} from "../providers/storage/supabase.js";
 
 /**
  * Resolve listen host/port for local vs hosted runtimes.
@@ -52,13 +57,20 @@ export function buildDefaultApp(env = process.env) {
     throw new Error("BOT_TOKEN is required to start the ALMAS API");
   }
 
+  // Single shared client for Finance + Inbox (and other readers that use drivers).
+  const sharedSupabase = getSupabaseClient();
+
   const financeReader = createFinanceReader({
     // Production path: financeStore → finance_transactions (same as bot writes).
     log: (line) => console.error(String(line)),
   });
 
   const inboxReader = createInboxReader({
-    listInboxItemsFn: listInboxItems,
+    listInboxItemsFn: (options, deps) =>
+      listInboxItems(options, {
+        ...deps,
+        supabase: deps?.supabase ?? sharedSupabase ?? undefined,
+      }),
   });
 
   const tasksReader = createTasksReader({
@@ -128,6 +140,8 @@ export function buildDefaultApp(env = process.env) {
     memoryReader,
     captureStore: defaultCaptureSessionStore,
     corsAllowlist: parseCorsAllowlist(env.ALMAS_API_CORS_ORIGIN),
+    supabaseReady: isSupabaseReady(),
+    supabaseStatus,
   });
 }
 
@@ -141,6 +155,11 @@ export function startServer(env = process.env) {
     // Non-reversible ops check only — never log BOT_TOKEN itself.
     console.log(`[auth] botTokenFingerprint=${fingerprint}`);
     logSupabaseStartupDiagnostics(console.log);
+    if (!isSupabaseReady()) {
+      console.error(
+        `[supabase] readiness=degraded reason=${supabaseStatus.reasonCode || "unknown"}`
+      );
+    }
   });
 
   const shutdown = (signal) => {

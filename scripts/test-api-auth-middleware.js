@@ -276,14 +276,20 @@ async function run() {
   });
 
   await test("/health remains public", async () => {
-    const app = createApp({ botToken: BOT, ...stubReaders(), log: () => {} });
+    const app = createApp({
+      botToken: BOT,
+      ...stubReaders(),
+      supabaseReady: true,
+      log: () => {},
+    });
     const { base, close } = await listen(app);
     try {
       const a = await request(base, "/health");
       const b = await request(base, "/api/health");
       assert.equal(a.status, 200);
       assert.equal(b.status, 200);
-      assert.deepEqual(a.body, { data: { ok: true } });
+      assert.deepEqual(a.body, { data: { ok: true, supabase: true } });
+      assert.deepEqual(b.body, { data: { ok: true, supabase: true } });
     } finally {
       await close();
     }

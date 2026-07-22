@@ -1,4 +1,4 @@
-import { supabase } from "./supabase.js";
+import { requireSupabaseClient } from "./supabase.js";
 import {
   sanitizeInboxMetadata,
   sanitizeRoutingDecision,
@@ -7,6 +7,11 @@ import {
 import { getInboxConfig } from "../../config/inbox.js";
 
 const TABLE = "inbox_items";
+
+function resolveInboxClient(deps = {}) {
+  if (deps.supabase) return deps.supabase;
+  return requireSupabaseClient();
+}
 
 /**
  * Maps a camelCase Inbox item to a snake_case DB row.
@@ -97,7 +102,7 @@ function logDriverError(operation, error) {
  * Inserts or upserts an Inbox item by unique request_key.
  */
 export async function insertInboxItem(item, deps = {}) {
-  const client = deps.supabase ?? supabase;
+  const client = resolveInboxClient(deps);
   const row = toInboxRow(item);
   delete row.id;
   delete row.created_at;
@@ -121,7 +126,7 @@ export async function insertInboxItem(item, deps = {}) {
  * Partial update by request_key. Patch is camelCase.
  */
 export async function updateInboxItemByRequestKey(requestKey, patch = {}, deps = {}) {
-  const client = deps.supabase ?? supabase;
+  const client = resolveInboxClient(deps);
   const config = getInboxConfig();
   const sanitizeOpts = {
     maxDepth: config.maxMetadataDepth,
@@ -169,7 +174,7 @@ export async function updateInboxItemByRequestKey(requestKey, patch = {}, deps =
 }
 
 export async function findInboxItemByRequestKey(requestKey, deps = {}) {
-  const client = deps.supabase ?? supabase;
+  const client = resolveInboxClient(deps);
 
   const { data, error } = await client
     .from(TABLE)
@@ -189,7 +194,7 @@ export async function findInboxItemByRequestKey(requestKey, deps = {}) {
  * @param {{ actorKey?, telegramUserId?, sourceType?, status?, informationKind?, limit?, offset? }} options
  */
 export async function listInboxItems(options = {}, deps = {}) {
-  const client = deps.supabase ?? supabase;
+  const client = resolveInboxClient(deps);
   const config = getInboxConfig();
   const limit = Number.isFinite(Number(options.limit))
     ? Math.max(1, Math.floor(Number(options.limit)))

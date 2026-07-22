@@ -76,11 +76,23 @@ export function createApp(deps) {
   });
 
   app.get("/api/health", (_req, res) => {
-    res.json({ data: { ok: true } });
+    const supabaseOk = deps.supabaseReady === true;
+    res.json({
+      data: {
+        ok: true,
+        supabase: supabaseOk,
+      },
+    });
   });
 
   app.get("/health", (_req, res) => {
-    res.json({ data: { ok: true } });
+    const supabaseOk = deps.supabaseReady === true;
+    res.json({
+      data: {
+        ok: true,
+        supabase: supabaseOk,
+      },
+    });
   });
 
   const auth = createAuthTelegramMiddleware({

@@ -158,6 +158,8 @@ export function createFinanceReader(deps = {}) {
           period: String(period),
           supabaseConfigured:
             status.urlPresent && status.keyPresent ? "true" : "false",
+          clientCreated: status.clientCreated ? "true" : "false",
+          reasonCode: status.reasonCode || "none",
           queryStarted: true,
         });
 
@@ -257,6 +259,8 @@ export function createFinanceReader(deps = {}) {
           limit: Number(limit) || 20,
           supabaseConfigured:
             status.urlPresent && status.keyPresent ? "true" : "false",
+          clientCreated: status.clientCreated ? "true" : "false",
+          reasonCode: status.reasonCode || "none",
           queryStarted: true,
         });
 
