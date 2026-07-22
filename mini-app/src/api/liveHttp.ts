@@ -209,7 +209,10 @@ export async function liveGetJson<T>(
     throw new ApiError(
       response.status === 400 ? "bad_request" : "unknown",
       "Request failed",
-      { status: response.status, retryable: response.status >= 500 }
+      {
+        status: response.status,
+        retryable: response.status >= 500 || response.status === 404,
+      }
     );
   }
 
@@ -335,7 +338,10 @@ export async function liveSendJson<T>(
     throw new ApiError(
       response.status === 400 ? "bad_request" : "unknown",
       "Request failed",
-      { status: response.status, retryable: response.status >= 500 }
+      {
+        status: response.status,
+        retryable: response.status >= 500 || response.status === 404,
+      }
     );
   }
 

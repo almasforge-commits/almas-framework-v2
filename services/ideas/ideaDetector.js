@@ -53,9 +53,13 @@ export function detectIdea(text) {
 
   // Explicit memory/task/finance commands are not ideas.
   if (
-    /^(запомни|запомнить|remember|купи|купить|потратил|расход|доход)\b/iu.test(
+    /^(запомни|запомнить|remember|купи|купить|потратил|потратила|получил|получила|заработал|заработала|расход|доход)\b/iu.test(
       trimmed
-    )
+    ) ||
+    /\b(потратил|потратила|получил|получила|заработал|заработала)\b/iu.test(
+      trimmed
+    ) ||
+    /(\d+(?:[.,]\d+)?)\s*(k|к|тыс|тысяч|тысячи|vnd|usd|доллар)/iu.test(trimmed)
   ) {
     return {
       isIdea: false,

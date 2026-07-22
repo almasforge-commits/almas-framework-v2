@@ -70,6 +70,15 @@ export function mapApiErrorToUi(error: unknown): ApiErrorUi {
         retryable: true,
       };
     }
+    if (error.code === "bad_request" || error.status === 404) {
+      return {
+        code: error.code === "bad_request" ? error.code : "unknown",
+        title: "Сессия Capture не найдена",
+        description:
+          "Сессия истекла, не сохранена или открыта из другого аккаунта. Создайте Capture заново из Telegram.",
+        retryable: true,
+      };
+    }
   }
 
   return {

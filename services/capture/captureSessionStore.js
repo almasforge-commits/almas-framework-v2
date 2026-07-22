@@ -263,6 +263,12 @@ export function mapCaptureSessionRow(row) {
  */
 export async function persistCaptureSessionToSupabase(session, supabase) {
   if (!session || !supabase) return false;
+  if (supabase.__almasUnavailable) {
+    console.log(
+      `[capture] persist ok=false reason=${supabase.reasonCode || "supabase_unavailable"}`
+    );
+    return false;
+  }
   try {
     const { error } = await supabase.from("capture_sessions").upsert(
       {
@@ -291,6 +297,7 @@ export async function persistCaptureSessionToSupabase(session, supabase) {
       );
       return false;
     }
+    console.log(`[capture] persist ok=true id=${session.id}`);
     return true;
   } catch (error) {
     console.log(
@@ -312,6 +319,12 @@ export async function loadCaptureSessionFromSupabase(
   supabase
 ) {
   if (!supabase || !sessionId) return null;
+  if (supabase.__almasUnavailable) {
+    console.log(
+      `[capture] loadById ok=false reason=${supabase.reasonCode || "supabase_unavailable"}`
+    );
+    return null;
+  }
   try {
     const { data, error } = await supabase
       .from("capture_sessions")
@@ -321,12 +334,27 @@ export async function loadCaptureSessionFromSupabase(
       .eq("id", String(sessionId))
       .maybeSingle();
 
-    if (error || !data) return null;
+    if (error) {
+      console.log(
+        `[capture] loadById ok=false reason=${error.message || "error"}`
+      );
+      return null;
+    }
+    if (!data) {
+      console.log(`[capture] loadById ok=false reason=not_found`);
+      return null;
+    }
     const session = mapCaptureSessionRow(data);
     if (!session) return null;
-    if (actorKey && session.actorKey !== actorKey) return null;
+    if (actorKey && session.actorKey !== actorKey) {
+      console.log(`[capture] loadById ok=false reason=actor_mismatch`);
+      return null;
+    }
     return session;
-  } catch {
+  } catch (error) {
+    console.log(
+      `[capture] loadById ok=false reason=${error?.message || "exception"}`
+    );
     return null;
   }
 }

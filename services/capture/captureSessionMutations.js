@@ -113,6 +113,26 @@ export async function confirmCaptureSessionById(
     options.executorDeps || {}
   );
 
+  const actions = Array.isArray(session?.draft?.actions)
+    ? session.draft.actions
+    : [];
+  const attempted = (execution?.results || []).filter(
+    (r) =>
+      r?.reason !== "skipped_duplicate" &&
+      r?.reason !== "skipped_knowledge_candidate" &&
+      r?.reason !== "unsupported_type"
+  );
+  const executedCount = execution?.executedCount ?? 0;
+
+  if (attempted.length > 0 && executedCount === 0) {
+    return {
+      ok: false,
+      reason: "persist_failed",
+      execution,
+      executedCount: 0,
+    };
+  }
+
   store.markExecuted(session.id);
   await store.clear(session.actorKey, session.chatId, "confirmed");
 
@@ -120,7 +140,7 @@ export async function confirmCaptureSessionById(
     ok: true,
     reason: "confirmed",
     execution,
-    executedCount: execution?.executedCount ?? 0,
+    executedCount,
   };
 }
 

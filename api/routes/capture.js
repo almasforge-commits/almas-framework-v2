@@ -77,11 +77,18 @@ export function createCaptureRouter(deps) {
       });
 
       if (!result.ok) {
-        const status = result.reason === "not_found" ? 404 : 400;
+        const status =
+          result.reason === "not_found"
+            ? 404
+            : result.reason === "persist_failed"
+              ? 503
+              : 400;
         throw new HttpError(
           status,
           result.reason || "confirm_failed",
-          "Cannot confirm capture session"
+          result.reason === "persist_failed"
+            ? "Capture confirm could not persist entities"
+            : "Cannot confirm capture session"
         );
       }
 

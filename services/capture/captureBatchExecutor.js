@@ -57,7 +57,7 @@ export async function executeCaptureBatch(session, context = {}, deps = {}) {
           results.push({ action, executed: false, reason: "missing_amount" });
           continue;
         }
-        await addExpenseFn({
+        const saved = await addExpenseFn({
           amount,
           category: action.payload?.category || "other",
           description: action.payload?.description || action.content || "",
@@ -65,7 +65,15 @@ export async function executeCaptureBatch(session, context = {}, deps = {}) {
           user_id: userId,
           batch_id: batchId,
         });
-        results.push({ action, executed: true, reason: "ok" });
+        if (!saved) {
+          results.push({
+            action,
+            executed: false,
+            reason: "finance_persist_failed",
+          });
+          continue;
+        }
+        results.push({ action, executed: true, reason: "ok", id: saved.id });
         continue;
       }
 
@@ -75,7 +83,7 @@ export async function executeCaptureBatch(session, context = {}, deps = {}) {
           results.push({ action, executed: false, reason: "missing_amount" });
           continue;
         }
-        await addIncomeFn({
+        const saved = await addIncomeFn({
           amount,
           category: action.payload?.category || "other",
           description: action.payload?.description || action.content || "",
@@ -83,7 +91,15 @@ export async function executeCaptureBatch(session, context = {}, deps = {}) {
           user_id: userId,
           batch_id: batchId,
         });
-        results.push({ action, executed: true, reason: "ok" });
+        if (!saved) {
+          results.push({
+            action,
+            executed: false,
+            reason: "finance_persist_failed",
+          });
+          continue;
+        }
+        results.push({ action, executed: true, reason: "ok", id: saved.id });
         continue;
       }
 
@@ -95,6 +111,7 @@ export async function executeCaptureBatch(session, context = {}, deps = {}) {
           results.push({ action, executed: false, reason: "missing_content" });
           continue;
         }
+        // Capture Review already classified this entity — do not re-run AI.
         const captured = await captureIdeaFn({
           text: content,
           content,
@@ -103,7 +120,10 @@ export async function executeCaptureBatch(session, context = {}, deps = {}) {
           chatId: session.chatId ?? context.chatId,
           source: session.source === "voice" ? "voice" : "text",
           confidence: action.confidence,
-          skipAi: deps.skipIdeaAi === true,
+          category: action.payload?.category || null,
+          tags: action.payload?.tags || null,
+          skipAi: deps.skipIdeaAi !== false,
+          skipRelated: deps.skipIdeaRelated === true,
           origin: "capture_session",
         });
         results.push({

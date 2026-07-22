@@ -152,6 +152,17 @@ export function CaptureSessionPage() {
     try {
       await apiClient.patchCaptureSession(sessionId, { actions });
       const result = await apiClient.confirmCaptureSession(sessionId);
+      if (!result.confirmed || !result.executedCount) {
+        setStatusNote("Nothing saved — check Finance/Ideas and retry.");
+        setErrorUi({
+          code: "unavailable",
+          title: "Сохранение не выполнено",
+          description:
+            "Confirm не записал данные. Проверьте соединение и повторите.",
+          retryable: true,
+        });
+        return;
+      }
       setStatusNote(`Saved ×${result.executedCount}.`);
       setSession((prev) => (prev ? { ...prev, status: "confirmed" } : prev));
     } catch (error: unknown) {

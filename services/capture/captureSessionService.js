@@ -160,6 +160,23 @@ export async function handleCaptureSessionTurn(input = {}, options = {}) {
       options.executorDeps || {}
     );
 
+    const attempted = (execution?.results || []).filter(
+      (r) =>
+        r?.reason !== "skipped_duplicate" &&
+        r?.reason !== "skipped_knowledge_candidate" &&
+        r?.reason !== "unsupported_type"
+    );
+    const executedCount = execution?.executedCount ?? 0;
+    if (attempted.length > 0 && executedCount === 0) {
+      return {
+        handled: true,
+        reason: "persist_failed",
+        execution,
+        message:
+          "⚠️ Не удалось сохранить. Данные не записаны — попробуйте Confirm ещё раз.",
+      };
+    }
+
     store.markExecuted(session.id);
     await store.clear(actorKey, chatId, "confirmed");
 

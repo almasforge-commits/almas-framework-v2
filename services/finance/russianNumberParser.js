@@ -57,10 +57,9 @@ const HUNDREDS = {
   "девятьсот": 900,
 };
 
-// "тыс"/"млн" abbreviations and "k"/"m" letter suffixes are intentionally
-// NOT included here — those are already handled by the existing
-// digit-suffix regex in financeParser.js (e.g. "40 тыс", "2 млн"). This
-// module only understands FULLY spelled-out number words.
+// "тыс"/"млн" abbreviations and "k"/"m"/"к" letter suffixes are handled by
+// financeParser.js digit-suffix regex. This module only understands FULLY
+// spelled-out number words.
 const SCALES = {
   "тысяча": 1_000,
   "тысячи": 1_000,
@@ -88,22 +87,6 @@ function stripTrailingPunctuation(token) {
  * Converts a phrase consisting ENTIRELY of Russian number words (and/or
  * plain digits) into a number, e.g. "сорок тысяч" -> 40000.
  *
- * Returns null if the phrase is empty, or contains any word that is not
- * a recognized number word/digit — deliberately conservative, it never
- * guesses, so ordinary non-financial words are never interpreted as
- * money.
- *
- * Supports additive combinations of units/teens/tens/hundreds with
- * тысяча/миллион scale words, e.g.:
- *   "сорок тысяч"                    -> 40000
- *   "сорок две тысячи"               -> 42000
- *   "сто двадцать тысяч"             -> 120000
- *   "один миллион"                   -> 1000000
- *   "два миллиона пятьсот тысяч"     -> 2500000
- *   "пятьсот"                        -> 500
- *
- * Out of scope: billions, fractions, general language understanding.
- *
  * @param {string} phrase
  * @returns {number|null}
  */
@@ -124,7 +107,6 @@ export function parseRussianNumberPhrase(phrase) {
   let matchedAny = false;
 
   for (const token of tokens) {
-
     if (/^\d+$/.test(token)) {
       current += parseInt(token, 10);
       matchedAny = true;
@@ -162,11 +144,7 @@ export function parseRussianNumberPhrase(phrase) {
       continue;
     }
 
-    // Any unrecognized word inside a phrase that is supposed to be
-    // entirely a number => not a valid spoken number. Bail out rather
-    // than guessing.
     return null;
-
   }
 
   if (!matchedAny) return null;
@@ -174,72 +152,101 @@ export function parseRussianNumberPhrase(phrase) {
   return total + current;
 }
 
+function isNumberToken(raw) {
+  const clean = stripTrailingPunctuation(String(raw ?? "")).toLowerCase();
+  if (!clean) return false;
+  return /^\d+$/.test(clean) || NUMBER_WORD_SET.has(clean);
+}
+
 /**
- * Scans `text` for the longest contiguous run of Russian number words
- * (and/or digits) and replaces it with the equivalent plain digit
- * string, leaving every other word untouched (including case and
- * spacing). If no such run is found, or the run fails to convert,
- * returns the original text unchanged.
- *
- * A run only ever consists of CONTIGUOUS tokens that are each,
- * individually, a recognized number word or a digit — so ordinary words
- * (e.g. "кофе", "если") are never mistaken for numbers, and this never
- * loops or scans more than once through the text.
+ * Tokenize into words / whitespace / punctuation so commas break runs:
+ * "75 тысяч, 25 тысяч" → two independent amounts, not 100000.
+ */
+function tokenizeForSpokenConversion(value) {
+  return String(value ?? "").split(/(\s+|[.,!?;:]+)/);
+}
+
+/**
+ * Scans `text` for contiguous Russian number-word / digit runs and replaces
+ * EACH run with digits (left → right). Punctuation breaks runs so list
+ * amounts stay separate.
  *
  * @param {string} text
  * @returns {string}
  */
 export function convertSpokenNumbersToDigits(text) {
   const value = String(text ?? "");
-
   if (!value.trim()) return value;
 
-  // Alternating [word, whitespace, word, whitespace, ...] so the
-  // original spacing/casing of every non-matched word is preserved
-  // exactly.
-  const parts = value.split(/(\s+)/);
+  const parts = tokenizeForSpokenConversion(value);
+  const out = [];
+  let i = 0;
 
-  let bestStart = -1;
-  let bestEnd = -1;
-  let bestLen = 0;
-  let runStart = -1;
+  while (i < parts.length) {
+    const part = parts[i];
 
-  for (let i = 0; i < parts.length; i += 2) {
-
-    const clean = stripTrailingPunctuation(parts[i]).toLowerCase();
-    const isNumberToken = /^\d+$/.test(clean) || NUMBER_WORD_SET.has(clean);
-
-    if (isNumberToken) {
-      if (runStart === -1) runStart = i;
-      const runLen = (i - runStart) / 2 + 1;
-      if (runLen > bestLen) {
-        bestLen = runLen;
-        bestStart = runStart;
-        bestEnd = i;
-      }
-    } else {
-      runStart = -1;
+    if (!part || /^\s+$/.test(part) || /^[.,!?;:]+$/.test(part)) {
+      out.push(part);
+      i += 1;
+      continue;
     }
 
+    if (!isNumberToken(part)) {
+      out.push(part);
+      i += 1;
+      continue;
+    }
+
+    // Collect one contiguous number-word run (words + intervening spaces only).
+    // After a scale word ("тысяч"), a following digit starts a NEW amount
+    // ("75 тысяч 25 тысяч" → 75000 + 25000), while word-form continuation
+    // stays in-run ("два миллиона пятьсот тысяч").
+    const runTokens = [];
+    let j = i;
+    while (j < parts.length) {
+      const token = parts[j];
+      if (!(token && isNumberToken(token))) break;
+
+      const clean = stripTrailingPunctuation(token).toLowerCase();
+      runTokens.push(stripTrailingPunctuation(token));
+      j += 1;
+
+      const closedByScale = clean in SCALES;
+      if (j < parts.length && /^\s+$/.test(parts[j])) {
+        const next = parts[j + 1];
+        if (next && isNumberToken(next)) {
+          const nextClean = stripTrailingPunctuation(next).toLowerCase();
+          if (closedByScale && /^\d+$/.test(nextClean)) {
+            // Digit after scale → separate list amount.
+            break;
+          }
+          j += 1;
+          continue;
+        }
+      }
+      if (closedByScale) {
+        // End of this amount unless whitespace+continuation handled above.
+        const nextIdx = j;
+        const next = parts[nextIdx];
+        if (next && isNumberToken(next)) {
+          const nextClean = stripTrailingPunctuation(next).toLowerCase();
+          if (/^\d+$/.test(nextClean)) break;
+        } else {
+          break;
+        }
+      }
+    }
+
+    const numericValue = parseRussianNumberPhrase(runTokens.join(" "));
+    if (numericValue == null) {
+      out.push(part);
+      i += 1;
+      continue;
+    }
+
+    out.push(String(numericValue));
+    i = j;
   }
 
-  if (bestLen === 0) return value;
-
-  const wordTokens = [];
-
-  for (let i = bestStart; i <= bestEnd; i += 2) {
-    wordTokens.push(stripTrailingPunctuation(parts[i]));
-  }
-
-  const numericValue = parseRussianNumberPhrase(wordTokens.join(" "));
-
-  if (numericValue == null) return value;
-
-  const trailingPunctuation =
-    parts[bestEnd].match(TRAILING_PUNCTUATION_REGEX)?.[0] ?? "";
-
-  const before = parts.slice(0, bestStart).join("");
-  const after = trailingPunctuation + parts.slice(bestEnd + 1).join("");
-
-  return `${before}${numericValue}${after}`;
+  return out.join("");
 }

@@ -4,7 +4,7 @@
  * Never writes to the database.
  */
 
-import { parseFinanceMessage } from "../finance/financeParser.js";
+import { parseFinanceMessage, looksLikeFinanceAttempt } from "../finance/financeParser.js";
 import { parseFinanceMessages } from "../finance/financeMultiParser.js";
 import {
   extractIdeaDeterministic,
@@ -191,6 +191,30 @@ export function buildDeterministicCaptureDraft(text) {
   let lastFinanceDirection = null;
   for (const segment of segments) {
     const cleanedSeg = stripLeadingConjunction(segment);
+
+    // Multi-amount segment ("75 тысяч, 25 тысяч и 300 тысяч") before single parse.
+    const multiSeg = parseFinanceMessages(cleanedSeg);
+    if (multiSeg.length > 1) {
+      for (const op of multiSeg) {
+        lastFinanceDirection = op.type;
+        financeFromSegments += 1;
+        push(
+          createCaptureAction({
+            type: op.type === "income" ? "finance_income" : "finance_expense",
+            content: op.description || "",
+            confidence: 0.9,
+            payload: {
+              amount: op.amount,
+              currency: op.currency || "VND",
+              description: op.description || "",
+              category: op.category || null,
+            },
+          })
+        );
+      }
+      continue;
+    }
+
     let fin = parseFinanceMessage(cleanedSeg);
     if (!fin && lastFinanceDirection) {
       fin = parseFinanceMessage(
@@ -198,6 +222,10 @@ export function buildDeterministicCaptureDraft(text) {
           ? `получил ${cleanedSeg}`
           : `потратил ${cleanedSeg}`
       );
+    }
+    // Bare money fragments ("75 тысяч", "300к") default to expense.
+    if (!fin && looksLikeFinanceAttempt(cleanedSeg)) {
+      fin = parseFinanceMessage(`потратил ${cleanedSeg}`);
     }
     if (!fin) continue;
     lastFinanceDirection = fin.type;
@@ -260,8 +288,10 @@ export function buildDeterministicCaptureDraft(text) {
   for (const segment of segments) {
     const cleanedSeg = stripLeadingConjunction(segment);
 
-    // Skip segments that are pure finance (already captured).
-    if (parseFinanceMessage(cleanedSeg)) continue;
+    // Skip segments that are finance (already captured) — never reclassify as Idea.
+    if (parseFinanceMessage(cleanedSeg) || looksLikeFinanceAttempt(cleanedSeg)) {
+      continue;
+    }
 
     const ideaItem = extractIdeaDeterministic(cleanedSeg);
     if (ideaItem) {
@@ -419,15 +449,43 @@ export async function buildCaptureDraft(text, options = {}) {
 function mergeActions(base, extra) {
   const out = [];
   const seen = new Set();
-  for (const action of [...(base || []), ...(extra || [])]) {
-    if (!action) continue;
+  const financeAmounts = new Set();
+
+  function pushMerged(action) {
+    if (!action) return;
+    if (
+      action.type === "idea_create" &&
+      looksLikeFinanceAttempt(
+        action.content || action.payload?.content || ""
+      )
+    ) {
+      return;
+    }
+    if (
+      (action.type === "finance_expense" || action.type === "finance_income") &&
+      Number.isFinite(Number(action.payload?.amount)) &&
+      financeAmounts.has(Number(action.payload.amount))
+    ) {
+      return;
+    }
     const sig = `${action.type}|${String(action.content)
       .toLowerCase()
       .replace(/\s+/g, " ")
       .slice(0, 100)}|${action.payload?.amount ?? ""}`;
-    if (seen.has(sig)) continue;
+    if (seen.has(sig)) return;
     seen.add(sig);
     out.push(action);
+    if (
+      action.type === "finance_expense" ||
+      action.type === "finance_income"
+    ) {
+      const amount = Number(action.payload?.amount);
+      if (Number.isFinite(amount)) financeAmounts.add(amount);
+    }
   }
+
+  // Deterministic first so Confirm never reclassifies finance as idea via AI.
+  for (const action of base || []) pushMerged(action);
+  for (const action of extra || []) pushMerged(action);
   return out;
 }
