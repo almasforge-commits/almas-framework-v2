@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/apiClient";
 import type {
   FinancePeriod,
@@ -14,6 +14,7 @@ import { LoadingState } from "../components/LoadingState";
 import { MetricCard } from "../components/MetricCard";
 import { SectionCard } from "../components/SectionCard";
 import { isMockMode } from "../config/env";
+import { useAuthGate } from "../telegram/useAuthGate";
 
 const PERIODS: Array<{ id: FinancePeriod; label: string }> = [
   { id: "today", label: "Сегодня" },
@@ -87,13 +88,15 @@ function CurrencyBreakdown({
 }
 
 export function FinancePage() {
+  const { authStatus, canFetch, authErrorUi } = useAuthGate();
   const [period, setPeriod] = useState<FinancePeriod>("month");
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
+    if (!canFetch) return;
     setLoading(true);
     setErrorUi(null);
     // One HTTP round-trip (SQL + FX once) instead of summary+transactions waterfall.
@@ -113,9 +116,17 @@ export function FinancePage() {
       })
       .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
-  };
+  }, [canFetch, period]);
 
-  useEffect(load, [period]);
+  useEffect(() => {
+    if (authStatus === "pending") return;
+    if (authStatus === "missing") {
+      setErrorUi(authErrorUi);
+      setLoading(false);
+      return;
+    }
+    load();
+  }, [authStatus, authErrorUi, load]);
 
   const base = summary?.baseCurrency || summary?.currency || "VND";
   const canShowCombined =

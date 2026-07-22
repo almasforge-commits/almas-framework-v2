@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/apiClient";
 import type { Task } from "../api/apiTypes";
 import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
@@ -9,13 +9,16 @@ import { ErrorState } from "../components/ErrorState";
 import { Header } from "../components/Header";
 import { LoadingState } from "../components/LoadingState";
 import { SectionCard } from "../components/SectionCard";
+import { useAuthGate } from "../telegram/useAuthGate";
 
 export function TasksPage() {
+  const { authStatus, canFetch, authErrorUi } = useAuthGate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
+    if (!canFetch) return;
     setLoading(true);
     setErrorUi(null);
     apiClient
@@ -23,9 +26,17 @@ export function TasksPage() {
       .then(setTasks)
       .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
-  };
+  }, [canFetch]);
 
-  useEffect(load, []);
+  useEffect(() => {
+    if (authStatus === "pending") return;
+    if (authStatus === "missing") {
+      setErrorUi(authErrorUi);
+      setLoading(false);
+      return;
+    }
+    load();
+  }, [authStatus, authErrorUi, load]);
 
   const grouped = useMemo(
     () => ({

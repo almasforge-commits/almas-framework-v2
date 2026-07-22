@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiClient } from "../api/apiClient";
 import type { HomePayload } from "../api/apiTypes";
-import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
+import { mapApiErrorToUi, ApiError, type ApiErrorUi } from "../api/apiErrors";
 import { DemoNotice } from "../components/DemoNotice";
 import { ActivityItemView } from "../components/dashboard/ActivityItem";
 import { DashboardEmpty } from "../components/dashboard/DashboardEmpty";
@@ -37,7 +37,7 @@ function isDashboardEmpty(data: HomePayload): boolean {
 }
 
 export function HomePage() {
-  const { user, browserPreview } = useTelegram();
+  const { user, browserPreview, authStatus } = useTelegram();
   const location = useLocation();
   const [data, setData] = useState<HomePayload | null>(null);
   const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
@@ -46,6 +46,19 @@ export function HomePage() {
 
   const load = useCallback(
     async (opts: { silent?: boolean } = {}) => {
+      if (authStatus === "pending") return;
+      if (authStatus === "missing") {
+        setErrorUi(
+          mapApiErrorToUi(
+            new ApiError("auth_required", "Telegram initData is required", {
+              status: 401,
+              retryable: false,
+            })
+          )
+        );
+        setLoading(false);
+        return;
+      }
       if (!opts.silent) {
         setLoading(true);
       }
@@ -59,35 +72,39 @@ export function HomePage() {
         setLoading(false);
       }
     },
-    [user.first_name]
+    [user.first_name, authStatus]
   );
 
   useEffect(() => {
+    if (authStatus === "pending") return;
     void load();
-  }, [load]);
+  }, [load, authStatus]);
 
   // Immediate refresh after Tasks Complete (even if Home was unmounted).
   useEffect(() => {
+    if (authStatus !== "ready") return;
     if (consumeDashboardStaleFlag()) {
       void load({ silent: true });
     }
     return onDashboardRefresh(() => {
+      if (authStatus !== "ready") return;
       void load({ silent: true });
     });
-  }, [load]);
+  }, [load, authStatus]);
 
-  // Refresh when navigating back to Dashboard after Tasks/Finance.
   useEffect(() => {
     if (location.pathname !== "/") return;
+    if (authStatus !== "ready") return;
     if (skipNextLocationRefresh.current) {
       skipNextLocationRefresh.current = false;
       return;
     }
     void load({ silent: true });
-  }, [location.key, location.pathname, load]);
+  }, [location.key, location.pathname, load, authStatus]);
 
   useEffect(() => {
     const onFocus = () => {
+      if (authStatus !== "ready") return;
       if (document.visibilityState === "visible") {
         void load({ silent: true });
       }
@@ -98,7 +115,7 @@ export function HomePage() {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [load]);
+  }, [load, authStatus]);
 
   const refresh = useCallback(() => load({ silent: true }), [load]);
   const { pullDistance, refreshing, handlers } = usePullToRefresh(refresh);

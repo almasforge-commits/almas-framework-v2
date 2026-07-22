@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/apiClient";
 import type { InboxItem, InformationKind } from "../api/apiTypes";
 import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
@@ -7,6 +7,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
 import { Header } from "../components/Header";
 import { LoadingState } from "../components/LoadingState";
+import { useAuthGate } from "../telegram/useAuthGate";
 
 const FILTERS: Array<{ id: "all" | InformationKind; label: string }> = [
   { id: "all", label: "Все" },
@@ -38,13 +39,15 @@ const STATUS_LABEL: Record<InboxItem["status"], string> = {
 };
 
 export function InboxPage() {
+  const { authStatus, canFetch, authErrorUi } = useAuthGate();
   const [items, setItems] = useState<InboxItem[]>([]);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
   const [selected, setSelected] = useState<InboxItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
+    if (!canFetch) return;
     setLoading(true);
     setErrorUi(null);
     apiClient
@@ -52,9 +55,17 @@ export function InboxPage() {
       .then(setItems)
       .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
-  };
+  }, [canFetch]);
 
-  useEffect(load, []);
+  useEffect(() => {
+    if (authStatus === "pending") return;
+    if (authStatus === "missing") {
+      setErrorUi(authErrorUi);
+      setLoading(false);
+      return;
+    }
+    load();
+  }, [authStatus, authErrorUi, load]);
 
   const filtered = useMemo(() => {
     if (filter === "all") return items;

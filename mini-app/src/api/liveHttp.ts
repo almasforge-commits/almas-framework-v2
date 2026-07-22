@@ -1,7 +1,11 @@
 import { ApiError } from "./apiErrors";
 import { recordApiDiag } from "./apiDiagnostics";
 import { joinApiUrl } from "../config/env";
-import { getRawInitData } from "../telegram/initData";
+import {
+  describeInitDataType,
+  getRawInitData,
+  normalizeTelegramInitData,
+} from "../telegram/initData";
 import {
   getTelegramWebApp,
   initTelegramWebApp,
@@ -15,28 +19,56 @@ export interface LiveHttpDeps {
   getInitData?: () => string | null;
   /** Test-only: skip / shorten initData retry delay. */
   initDataRetryMs?: number;
-  /** Test-only: bound initData poll attempts (default 4). */
+  /** Test-only: bound initData poll attempts (default 5). */
   initDataAttempts?: number;
 }
 
 /**
- * Exact ALMAS auth header. Must not mutate initData (no decode/JSON/trim of body).
+ * Build Authorization only from already-normalized initData.
+ * Rejects "null" / junk even if callers skip normalize.
+ * Never coerce nullable values into the Authorization header.
  */
 export function buildAuthHeader(initData: string): string {
+  const normalized = normalizeTelegramInitData(initData);
+  if (!normalized) {
+    throw new ApiError("auth_required", "Telegram initData is required", {
+      status: 401,
+      retryable: false,
+    });
+  }
   // Prefix only — preserve every character of raw Telegram.WebApp.initData.
-  return `tma ${initData}`;
+  return `tma ${normalized}`;
 }
 
 /** Safe client auth diagnostics — never logs raw initData or Authorization. */
 export function logMiniAppAuthDiag(opts: {
   telegramSdkPresent: boolean;
+  webAppPresent?: boolean;
+  initDataType?: string;
   initDataPresent: boolean;
   initDataLength: number;
+  hashMarkerPresent?: boolean;
+  authDateMarkerPresent?: boolean;
   authHeaderBuilt: boolean;
+  launchPlatform?: string | null;
 }): void {
   // eslint-disable-next-line no-console
   console.info(
     `[mini-app-auth] telegramSdkPresent=${opts.telegramSdkPresent ? "true" : "false"}`
+  );
+  // eslint-disable-next-line no-console
+  console.info(
+    `[mini-app-auth] webAppPresent=${
+      opts.webAppPresent === undefined
+        ? String(opts.telegramSdkPresent)
+        : opts.webAppPresent
+          ? "true"
+          : "false"
+    }`
+  );
+  // eslint-disable-next-line no-console
+  console.info(
+    `[mini-app-auth] initDataType=${opts.initDataType ?? "unknown"}`
   );
   // eslint-disable-next-line no-console
   console.info(
@@ -46,7 +78,19 @@ export function logMiniAppAuthDiag(opts: {
   console.info(`[mini-app-auth] initDataLength=${opts.initDataLength}`);
   // eslint-disable-next-line no-console
   console.info(
+    `[mini-app-auth] hashMarkerPresent=${opts.hashMarkerPresent ? "true" : "false"}`
+  );
+  // eslint-disable-next-line no-console
+  console.info(
+    `[mini-app-auth] authDateMarkerPresent=${opts.authDateMarkerPresent ? "true" : "false"}`
+  );
+  // eslint-disable-next-line no-console
+  console.info(
     `[mini-app-auth] authHeaderBuilt=${opts.authHeaderBuilt ? "true" : "false"}`
+  );
+  // eslint-disable-next-line no-console
+  console.info(
+    `[mini-app-auth] launchPlatform=${opts.launchPlatform ?? "unknown"}`
   );
 }
 
@@ -57,17 +101,17 @@ function sleep(ms: number): Promise<void> {
 /**
  * Read initData after ensuring WebApp.ready().
  * Bounded retries help Telegram Desktop when the bridge fills initData
- * slightly after first paint.
+ * slightly after first paint. Never accepts literal "null".
  */
 export async function resolveInitDataForRequest(
-  getInitData: () => string | null,
-  retryMs = 50,
-  attempts = 3
+  getInitData: () => string | null | undefined,
+  retryMs = 120,
+  attempts = 5
 ): Promise<string | null> {
   const maxAttempts = Math.max(1, attempts);
   for (let i = 0; i < maxAttempts; i += 1) {
     initTelegramWebApp();
-    const value = getInitData();
+    const value = normalizeTelegramInitData(getInitData());
     if (value) return value;
     if (i < maxAttempts - 1 && retryMs > 0) {
       await sleep(retryMs);
@@ -81,10 +125,6 @@ function pathOnly(path: string): string {
   return q >= 0 ? path.slice(0, q) : path;
 }
 
-/**
- * Minimal safe HTTP failure diagnostics (no Authorization / initData / tokens).
- * Compact single line — verbose multi-line logs removed after CORS fix verified.
- */
 function logLiveHttpFailure(opts: {
   phase: string;
   url: string;
@@ -100,8 +140,7 @@ function logLiveHttpFailure(opts: {
       : err != null
         ? String(err)
         : "";
-  const status =
-    opts.status == null ? "none" : String(opts.status);
+  const status = opts.status == null ? "none" : String(opts.status);
   const body =
     opts.bodyText && opts.bodyText.trim()
       ? ` body=${opts.bodyText.slice(0, 160)}`
@@ -110,6 +149,33 @@ function logLiveHttpFailure(opts: {
   console.error(
     `[mini-app-http] phase=${opts.phase} method=${opts.method} status=${status} url=${opts.url}${message ? ` error=${message}` : ""}${body}`
   );
+}
+
+function readLaunchPlatform(): string {
+  const platform = getTelegramWebApp()?.platform;
+  return typeof platform === "string" && platform.trim()
+    ? platform.trim()
+    : "unknown";
+}
+
+function authDiagFromRaw(initData: string | null) {
+  const webApp = getTelegramWebApp();
+  const raw = webApp?.initData;
+  const rawString = typeof raw === "string" ? raw : "";
+  return {
+    telegramSdkPresent: Boolean(webApp),
+    webAppPresent: Boolean(webApp),
+    initDataType: describeInitDataType(raw),
+    initDataPresent: Boolean(initData),
+    // Length of normalized value when valid; otherwise length of raw junk
+    // (e.g. "null" → 4) without logging the payload itself.
+    initDataLength: initData ? initData.length : rawString.length,
+    hashMarkerPresent: Boolean(initData) || rawString.includes("hash="),
+    authDateMarkerPresent:
+      Boolean(initData) || rawString.includes("auth_date="),
+    authHeaderBuilt: false,
+    launchPlatform: readLaunchPlatform(),
+  };
 }
 
 /**
@@ -145,8 +211,8 @@ export async function liveGetJson<T>(
   }
 
   const getInitData = deps.getInitData ?? getRawInitData;
-  const retryMs = deps.initDataRetryMs ?? 100;
-  const attempts = deps.initDataAttempts ?? (retryMs <= 0 ? 1 : 4);
+  const retryMs = deps.initDataRetryMs ?? 120;
+  const attempts = deps.initDataAttempts ?? (retryMs <= 0 ? 1 : 5);
   const initData = await resolveInitDataForRequest(
     getInitData,
     retryMs,
@@ -154,12 +220,7 @@ export async function liveGetJson<T>(
   );
 
   if (!initData) {
-    logMiniAppAuthDiag({
-      telegramSdkPresent: Boolean(getTelegramWebApp()),
-      initDataPresent: false,
-      initDataLength: 0,
-      authHeaderBuilt: false,
-    });
+    logMiniAppAuthDiag(authDiagFromRaw(null));
     recordApiDiag({
       apiHost: (() => {
         try {
@@ -187,15 +248,26 @@ export async function liveGetJson<T>(
     });
   }
 
-  const authorization = buildAuthHeader(initData);
+  let authorization: string;
+  try {
+    authorization = buildAuthHeader(initData);
+  } catch (error) {
+    logMiniAppAuthDiag(authDiagFromRaw(null));
+    throw error instanceof ApiError
+      ? error
+      : new ApiError("auth_required", "Telegram initData is required", {
+          status: 401,
+          retryable: false,
+        });
+  }
+
   logMiniAppAuthDiag({
-    telegramSdkPresent: Boolean(getTelegramWebApp()),
-    initDataPresent: true,
-    initDataLength: initData.length,
+    ...authDiagFromRaw(initData),
     authHeaderBuilt:
       authorization.startsWith("tma ") &&
       authorization.slice(4) === initData &&
-      !authorization.slice(4).startsWith("tma "),
+      !authorization.slice(4).startsWith("tma ") &&
+      Boolean(initData),
   });
 
   const fetchFn = deps.fetchFn ?? fetch;
@@ -210,9 +282,6 @@ export async function liveGetJson<T>(
 
   let response: Response;
   try {
-    // Do NOT send Cache-Control request header: it is not CORS-safelisted and
-    // was missing from Access-Control-Allow-Headers → browser preflight failed
-    // → TypeError in fetch → UI «Нет соединения». cache:'no-store' is enough.
     response = await fetchFn(url, {
       method: "GET",
       cache: "no-store",
@@ -256,7 +325,7 @@ export async function liveGetJson<T>(
       status: 401,
       bodyText,
     });
-    throw new ApiError("unauthorized", "Unauthorized", {
+    throw new ApiError("auth_required", "Unauthorized", {
       status: 401,
       retryable: false,
     });
@@ -298,7 +367,10 @@ export async function liveGetJson<T>(
   try {
     payload = await response.json();
   } catch (error) {
-    recordApiDiag({ errorCategory: "malformed", responseStatus: response.status });
+    recordApiDiag({
+      errorCategory: "malformed",
+      responseStatus: response.status,
+    });
     logLiveHttpFailure({
       phase: "json_parse",
       url,
@@ -318,7 +390,10 @@ export async function liveGetJson<T>(
     !("data" in payload) ||
     (payload as { data: unknown }).data === undefined
   ) {
-    recordApiDiag({ errorCategory: "malformed", responseStatus: response.status });
+    recordApiDiag({
+      errorCategory: "malformed",
+      responseStatus: response.status,
+    });
     logLiveHttpFailure({
       phase: "missing_data_envelope",
       url,
@@ -360,8 +435,8 @@ export async function liveSendJson<T>(
   }
 
   const getInitData = deps.getInitData ?? getRawInitData;
-  const retryMs = deps.initDataRetryMs ?? 100;
-  const attempts = deps.initDataAttempts ?? (retryMs <= 0 ? 1 : 4);
+  const retryMs = deps.initDataRetryMs ?? 120;
+  const attempts = deps.initDataAttempts ?? (retryMs <= 0 ? 1 : 5);
   const initData = await resolveInitDataForRequest(
     getInitData,
     retryMs,
@@ -369,6 +444,7 @@ export async function liveSendJson<T>(
   );
 
   if (!initData) {
+    logMiniAppAuthDiag(authDiagFromRaw(null));
     recordApiDiag({
       endpoint,
       fetchAttempted: false,
@@ -379,6 +455,19 @@ export async function liveSendJson<T>(
       status: 401,
       retryable: false,
     });
+  }
+
+  let authorization: string;
+  try {
+    authorization = buildAuthHeader(initData);
+  } catch (error) {
+    logMiniAppAuthDiag(authDiagFromRaw(null));
+    throw error instanceof ApiError
+      ? error
+      : new ApiError("auth_required", "Telegram initData is required", {
+          status: 401,
+          retryable: false,
+        });
   }
 
   const fetchFn = deps.fetchFn ?? fetch;
@@ -399,7 +488,7 @@ export async function liveSendJson<T>(
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        Authorization: buildAuthHeader(initData),
+        Authorization: authorization,
       },
       body: JSON.stringify(body ?? {}),
     });
@@ -436,7 +525,7 @@ export async function liveSendJson<T>(
       status: 401,
       bodyText,
     });
-    throw new ApiError("unauthorized", "Unauthorized", {
+    throw new ApiError("auth_required", "Unauthorized", {
       status: 401,
       retryable: false,
     });

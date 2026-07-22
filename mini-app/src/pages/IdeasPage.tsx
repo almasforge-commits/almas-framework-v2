@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiClient } from "../api/apiClient";
 import type { IdeaItem } from "../api/apiTypes";
@@ -9,18 +9,21 @@ import { ErrorState } from "../components/ErrorState";
 import { Header } from "../components/Header";
 import { LoadingState } from "../components/LoadingState";
 import { SectionCard } from "../components/SectionCard";
+import { useAuthGate } from "../telegram/useAuthGate";
 
 /**
  * Ideas list/detail — live actor-scoped data via apiClient.
  */
 export function IdeasPage() {
   const { ideaId } = useParams();
+  const { authStatus, canFetch, authErrorUi } = useAuthGate();
   const [items, setItems] = useState<IdeaItem[]>([]);
   const [detail, setDetail] = useState<IdeaItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
+    if (!canFetch) return;
     setLoading(true);
     setErrorUi(null);
     if (ideaId) {
@@ -43,9 +46,17 @@ export function IdeasPage() {
       })
       .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
-  };
+  }, [canFetch, ideaId]);
 
-  useEffect(load, [ideaId]);
+  useEffect(() => {
+    if (authStatus === "pending") return;
+    if (authStatus === "missing") {
+      setErrorUi(authErrorUi);
+      setLoading(false);
+      return;
+    }
+    load();
+  }, [authStatus, authErrorUi, load]);
 
   return (
     <div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/apiClient";
 import type { KnowledgeItem } from "../api/apiTypes";
 import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
@@ -7,6 +7,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
 import { Header } from "../components/Header";
 import { LoadingState } from "../components/LoadingState";
+import { useAuthGate } from "../telegram/useAuthGate";
 
 const SOURCE_LABEL: Record<KnowledgeItem["sourceType"], string> = {
   youtube: "YouTube",
@@ -16,12 +17,14 @@ const SOURCE_LABEL: Record<KnowledgeItem["sourceType"], string> = {
 };
 
 export function KnowledgePage() {
+  const { authStatus, canFetch, authErrorUi } = useAuthGate();
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
+    if (!canFetch) return;
     setLoading(true);
     setErrorUi(null);
     apiClient
@@ -29,9 +32,17 @@ export function KnowledgePage() {
       .then(setItems)
       .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
-  };
+  }, [canFetch]);
 
-  useEffect(load, []);
+  useEffect(() => {
+    if (authStatus === "pending") return;
+    if (authStatus === "missing") {
+      setErrorUi(authErrorUi);
+      setLoading(false);
+      return;
+    }
+    load();
+  }, [authStatus, authErrorUi, load]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

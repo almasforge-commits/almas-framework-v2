@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiClient } from "../api/apiClient";
 import type { CaptureAction, CaptureSessionDetail } from "../api/apiTypes";
@@ -7,6 +7,7 @@ import { ErrorState } from "../components/ErrorState";
 import { Header } from "../components/Header";
 import { LoadingState } from "../components/LoadingState";
 import { SectionCard } from "../components/SectionCard";
+import { useAuthGate } from "../telegram/useAuthGate";
 
 const CURRENCIES = ["VND", "USD", "EUR", "RUB", "KZT"];
 
@@ -80,6 +81,7 @@ function localValidationErrors(actions: CaptureAction[]): string[] {
 
 export function CaptureSessionPage() {
   const { sessionId = "" } = useParams();
+  const { authStatus, canFetch, authErrorUi } = useAuthGate();
   const [session, setSession] = useState<CaptureSessionDetail | null>(null);
   const [actions, setActions] = useState<CaptureAction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,7 +92,8 @@ export function CaptureSessionPage() {
 
   const editable = session?.status === "pending" || session?.status === "editing";
 
-  const load = () => {
+  const load = useCallback(() => {
+    if (!canFetch) return;
     if (!sessionId) {
       setErrorUi({
         code: "bad_request",
@@ -113,9 +116,17 @@ export function CaptureSessionPage() {
       })
       .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
-  };
+  }, [canFetch, sessionId]);
 
-  useEffect(load, [sessionId]);
+  useEffect(() => {
+    if (authStatus === "pending") return;
+    if (authStatus === "missing") {
+      setErrorUi(authErrorUi);
+      setLoading(false);
+      return;
+    }
+    load();
+  }, [authStatus, authErrorUi, load]);
 
   const counts = useMemo(() => {
     const c = {

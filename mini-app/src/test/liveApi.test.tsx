@@ -26,10 +26,26 @@ import {
 import { getRawInitData } from "../telegram/initData";
 import { FinancePage } from "../pages/FinancePage";
 import App from "../App";
+import { TelegramProvider } from "../telegram/TelegramProvider";
 import apiClientSource from "../api/apiClient.ts?raw";
 import realApiSource from "../api/realApi.ts?raw";
 import liveHttpSource from "../api/liveHttp.ts?raw";
 import envSource from "../config/env.ts?raw";
+
+const VALID_INIT =
+  "query_id=AAE&user=%7B%22id%22%3A1%2C%22first_name%22%3A%22A%2BB%22%7D&auth_date=1710000000&hash=abcdef0123456789";
+
+function renderFinance() {
+  return render(
+    <TelegramProvider>
+      <MemoryRouter initialEntries={["/finance"]}>
+        <Routes>
+          <Route path="/finance" element={<FinancePage />} />
+        </Routes>
+      </MemoryRouter>
+    </TelegramProvider>
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -96,8 +112,7 @@ describe("env selection (VITE_ALMAS_*)", () => {
 
 describe("live API client", () => {
   it("Authorization header contains raw initData exactly (no mutation)", async () => {
-    const initData =
-      "query_id=AAE&user=%7B%22id%22%3A1%2C%22first_name%22%3A%22A%2BB%22%7D&auth_date=1710000000&hash=abcdef0123456789";
+    const initData = VALID_INIT;
     let seenAuth: string | null = null;
     const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
       seenAuth = String((init?.headers as Record<string, string>).Authorization);
@@ -177,9 +192,9 @@ describe("live API client", () => {
     let calls = 0;
     const initData = await resolveInitDataForRequest(() => {
       calls += 1;
-      return calls >= 2 ? "raw-later" : null;
+      return calls >= 2 ? VALID_INIT : null;
     }, 5, 3);
-    expect(initData).toBe("raw-later");
+    expect(initData).toBe(VALID_INIT);
     expect(calls).toBe(2);
   });
 
@@ -232,7 +247,7 @@ describe("live API client", () => {
     const api = createRealApi({
       baseUrl: "https://web-production-6d53b.up.railway.app",
       fetchFn,
-      getInitData: () => "raw-init",
+      getInitData: () => VALID_INIT,
       initDataRetryMs: 0,
     });
 
@@ -257,7 +272,7 @@ describe("live API client", () => {
       "https://web-production-6d53b.up.railway.app/api/memory",
       "https://web-production-6d53b.up.railway.app/api/ideas",
     ]);
-    expect(auths.every((h) => h === "tma raw-init")).toBe(true);
+    expect(auths.every((h) => h === `tma ${VALID_INIT}`)).toBe(true);
     expect(getApiDiagSnapshot().fetchAttempted).toBe(true);
   });
 
@@ -280,7 +295,7 @@ describe("live API client", () => {
     const api = createRealApi({
       baseUrl: "https://web-production-6d53b.up.railway.app",
       fetchFn: fetchFn as unknown as typeof fetch,
-      getInitData: () => "raw",
+      getInitData: () => VALID_INIT,
       initDataRetryMs: 0,
     });
     await api.getFinanceSummary("month");
@@ -312,16 +327,16 @@ describe("live API client", () => {
     const api = createRealApi({
       baseUrl: "http://api.test",
       fetchFn: fetch401 as unknown as typeof fetch,
-      getInitData: () => "raw",
+      getInitData: () => VALID_INIT,
       initDataRetryMs: 0,
     });
-    await expect(api.getTasks()).rejects.toMatchObject({ code: "unauthorized" });
+    await expect(api.getTasks()).rejects.toMatchObject({ code: "auth_required" });
 
     const fetch503 = vi.fn(async () => new Response("{}", { status: 503 }));
     const api503 = createRealApi({
       baseUrl: "http://api.test",
       fetchFn: fetch503 as unknown as typeof fetch,
-      getInitData: () => "raw",
+      getInitData: () => VALID_INIT,
       initDataRetryMs: 0,
     });
     await expect(api503.getTasks()).rejects.toMatchObject({ code: "unavailable" });
@@ -332,7 +347,7 @@ describe("live API client", () => {
     const apiNet = createRealApi({
       baseUrl: "http://api.test",
       fetchFn: fetchNet as unknown as typeof fetch,
-      getInitData: () => "raw",
+      getInitData: () => VALID_INIT,
       initDataRetryMs: 0,
     });
     await expect(apiNet.getTasks()).rejects.toMatchObject({ code: "network" });
@@ -350,7 +365,7 @@ describe("live API client", () => {
     const fetchFn = vi.fn();
     const api = createRealApi({
       baseUrl: "",
-      getInitData: () => "raw",
+      getInitData: () => VALID_INIT,
       fetchFn: fetchFn as unknown as typeof fetch,
       initDataRetryMs: 0,
     });
@@ -367,7 +382,7 @@ describe("live API client", () => {
     await expect(
       createRealApi({
         baseUrl: "",
-        getInitData: () => "x",
+        getInitData: () => VALID_INIT,
         fetchFn: vi.fn() as unknown as typeof fetch,
         initDataRetryMs: 0,
       }).getMemory()
@@ -432,13 +447,7 @@ describe("FinancePage mount → API", () => {
         transactions: [],
       });
 
-    render(
-      <MemoryRouter initialEntries={["/finance"]}>
-        <Routes>
-          <Route path="/finance" element={<FinancePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderFinance();
 
     await waitFor(() => {
       expect(overviewSpy).toHaveBeenCalledWith("month");
@@ -473,7 +482,7 @@ describe("FinancePage mount → API", () => {
     const live = createRealApi({
       baseUrl: "https://web-production-6d53b.up.railway.app",
       fetchFn: fetchFn as unknown as typeof fetch,
-      getInitData: () => "query_id=1&hash=x",
+      getInitData: () => VALID_INIT,
       initDataRetryMs: 0,
     });
 
@@ -482,13 +491,7 @@ describe("FinancePage mount → API", () => {
       .spyOn(apiClientMod.apiClient, "getFinanceOverview")
       .mockImplementation((period) => live.getFinanceOverview(period));
 
-    render(
-      <MemoryRouter initialEntries={["/finance"]}>
-        <Routes>
-          <Route path="/finance" element={<FinancePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderFinance();
 
     await waitFor(() => expect(fetchFn).toHaveBeenCalled());
     expect(calls).toContain(
@@ -501,7 +504,7 @@ describe("FinancePage mount → API", () => {
       | [RequestInfo | URL, RequestInit?]
       | undefined;
     const auth = (firstCall?.[1]?.headers ?? {}) as Record<string, string>;
-    expect(auth.Authorization).toBe("tma query_id=1&hash=x");
+    expect(auth.Authorization).toBe(`tma ${VALID_INIT}`);
 
     overviewSpy.mockRestore();
   });
@@ -512,13 +515,7 @@ describe("FinancePage mount → API", () => {
       new ApiError("network", "Network request failed", { retryable: true })
     );
 
-    render(
-      <MemoryRouter initialEntries={["/finance"]}>
-        <Routes>
-          <Route path="/finance" element={<FinancePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderFinance();
 
     expect(await screen.findByText("Нет соединения")).toBeInTheDocument();
     expect(screen.queryByText("Демо")).not.toBeInTheDocument();
@@ -533,13 +530,7 @@ describe("FinancePage mount → API", () => {
       })
     );
 
-    render(
-      <MemoryRouter initialEntries={["/finance"]}>
-        <Routes>
-          <Route path="/finance" element={<FinancePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderFinance();
 
     expect(
       await screen.findByTestId("auth-required-state")
