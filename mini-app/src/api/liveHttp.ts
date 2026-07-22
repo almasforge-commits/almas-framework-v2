@@ -82,8 +82,8 @@ function pathOnly(path: string): string {
 }
 
 /**
- * Temporary production diagnostics for «Нет соединения».
- * Never logs Authorization / initData / tokens.
+ * Minimal safe HTTP failure diagnostics (no Authorization / initData / tokens).
+ * Compact single line — verbose multi-line logs removed after CORS fix verified.
  */
 function logLiveHttpFailure(opts: {
   phase: string;
@@ -100,31 +100,16 @@ function logLiveHttpFailure(opts: {
       : err != null
         ? String(err)
         : "";
-  const stack = err instanceof Error ? err.stack || "" : "";
-  // eslint-disable-next-line no-console
-  console.error(`[mini-app-http] phase=${opts.phase}`);
-  // eslint-disable-next-line no-console
-  console.error(`[mini-app-http] method=${opts.method}`);
-  // eslint-disable-next-line no-console
-  console.error(`[mini-app-http] url=${opts.url}`);
+  const status =
+    opts.status == null ? "none" : String(opts.status);
+  const body =
+    opts.bodyText && opts.bodyText.trim()
+      ? ` body=${opts.bodyText.slice(0, 160)}`
+      : "";
   // eslint-disable-next-line no-console
   console.error(
-    `[mini-app-http] status=${opts.status == null ? "none" : String(opts.status)}`
+    `[mini-app-http] phase=${opts.phase} method=${opts.method} status=${status} url=${opts.url}${message ? ` error=${message}` : ""}${body}`
   );
-  if (message) {
-    // eslint-disable-next-line no-console
-    console.error(`[mini-app-http] error=${message}`);
-  }
-  if (stack) {
-    // eslint-disable-next-line no-console
-    console.error(`[mini-app-http] stack=${stack}`);
-  }
-  if (opts.bodyText != null && opts.bodyText !== "") {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[mini-app-http] body=${opts.bodyText.slice(0, 500)}`
-    );
-  }
 }
 
 /**
@@ -158,9 +143,6 @@ export async function liveGetJson<T>(
       retryable: false,
     });
   }
-
-  // eslint-disable-next-line no-console
-  console.info(`[mini-app-http] first_request_url=${url}`);
 
   const getInitData = deps.getInitData ?? getRawInitData;
   const retryMs = deps.initDataRetryMs ?? 100;
@@ -264,9 +246,6 @@ export async function liveGetJson<T>(
     responseStatus: response.status,
     errorCategory: response.ok ? null : String(response.status),
   });
-
-  // eslint-disable-next-line no-console
-  console.info(`[mini-app-http] status=${response.status} url=${url}`);
 
   if (response.status === 401) {
     const bodyText = await response.clone().text().catch(() => "");
@@ -447,9 +426,6 @@ export async function liveSendJson<T>(
     responseStatus: response.status,
     errorCategory: response.ok ? null : String(response.status),
   });
-
-  // eslint-disable-next-line no-console
-  console.info(`[mini-app-http] status=${response.status} url=${url}`);
 
   if (response.status === 401) {
     const bodyText = await response.clone().text().catch(() => "");
