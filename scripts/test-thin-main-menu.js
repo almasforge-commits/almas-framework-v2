@@ -108,7 +108,7 @@ await test("4. меню / главная use the same simplified keyboard", asyn
   assert.ok(isMenuNavigationCommand("/start"));
 });
 
-await test("5–6. Open ALMAS uses Web App URL or short missing fallback", async () => {
+await test("5–6. Open ALMAS uses inline Web App button or short missing fallback", async () => {
   const sendMissing = spy();
   await sendOpenAlmas("c1", { sendMessageFn: sendMissing, webAppUrl: null });
   assert.match(sendMissing.calls[0][1], /Mini App пока не подключён/);
@@ -117,9 +117,13 @@ await test("5–6. Open ALMAS uses Web App URL or short missing fallback", async
   await sendOpenAlmas("c1", {
     sendMessageFn: sendOk,
     webAppUrl: "https://app.example/almas",
+    chatType: "private",
   });
-  assert.ok(!/Mini App пока не подключён/.test(sendOk.calls[0][1]));
-  assert.ok(sendOk.calls[0][2].reply_markup.keyboard);
+  const [, text, extra] = sendOk.calls[0];
+  assert.ok(!/Mini App пока не подключён/.test(text));
+  const btn = extra.reply_markup.inline_keyboard[0][0];
+  assert.ok(btn.web_app?.url);
+  assert.equal(btn.url, undefined);
 
   const script = `
     import { buildMainMenuKeyboard } from "../handlers/keyboards/mainMenu.js";
@@ -133,10 +137,10 @@ await test("5–6. Open ALMAS uses Web App URL or short missing fallback", async
       encoding: "utf8",
     })
   );
-  assert.deepEqual(withUrl, {
-    text: MENU_BUTTON_LABELS.openAlmas,
-    web_app: { url: "https://app.almas.example/" },
-  });
+  assert.equal(withUrl.text, MENU_BUTTON_LABELS.openAlmas);
+  assert.ok(withUrl.web_app?.url);
+  assert.equal(withUrl.url, undefined);
+  assert.match(withUrl.web_app.url, /^https:\/\/app\.almas\.example\/?$/);
 });
 
 await test("7–8. Help is concise onboarding with finance/idea/task/memory/mixed examples", async () => {

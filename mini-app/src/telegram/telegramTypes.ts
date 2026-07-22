@@ -22,6 +22,8 @@ export interface TelegramUser {
 export interface TelegramWebApp {
   ready: () => void;
   expand: () => void;
+  /** Telegram client platform, e.g. "ios" | "android" | "tdesktop" | "web" */
+  platform?: string;
   colorScheme?: TelegramColorScheme;
   themeParams?: TelegramThemeParams;
   initData?: string;

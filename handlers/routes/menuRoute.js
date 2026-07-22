@@ -1,5 +1,11 @@
 import { ALMAS_WEB_APP_URL } from "../../config/webapp.js";
 import {
+  createMiniAppButton,
+  isPrivateChatType,
+  MINI_APP_PATHS,
+  THIN_CONFIRM,
+} from "../../config/deepLinks.js";
+import {
   buildMainMenuKeyboard,
   buildHomeOnlyKeyboard,
   buildKnowledgeMenuKeyboard,
@@ -8,6 +14,7 @@ import {
   buildMemoryMenuKeyboard,
   buildIdeasMenuKeyboard,
   buildIdeasEmptyMenuKeyboard,
+  MENU_BUTTON_LABELS,
 } from "../keyboards/mainMenu.js";
 import { defaultNavigationContextStore } from "../../services/navigation/navigationContextStore.js";
 import { setNavigationListContext } from "../../services/navigation/navigationRoute.js";
@@ -266,14 +273,49 @@ export async function sendProjectsPlaceholder(chatId, options = {}) {
 }
 
 export async function sendOpenAlmas(chatId, options = {}) {
-  const { sendMessageFn = defaultSendMessageFn, webAppUrl = ALMAS_WEB_APP_URL } = options;
-  const { reply_markup } = buildMainMenuKeyboard();
+  const {
+    sendMessageFn = defaultSendMessageFn,
+    webAppUrl = ALMAS_WEB_APP_URL,
+    chatType = "private",
+  } = options;
 
-  const message = webAppUrl
-    ? "🌐 ALMAS открывается через кнопку меню."
-    : "Mini App пока не подключён.";
+  if (!isPrivateChatType(chatType)) {
+    await sendMessageFn(chatId, THIN_CONFIRM.openPrivately);
+    return;
+  }
 
-  await sendMessageFn(chatId, message, { reply_markup });
+  if (!webAppUrl) {
+    await sendMessageFn(chatId, "Mini App пока не подключён.", {
+      reply_markup: buildMainMenuKeyboard().reply_markup,
+    });
+    return;
+  }
+
+  // Always offer an inline web_app button. Reply-keyboard web_app can be
+  // stale on the client if ALMAS_WEB_APP_URL was added after the keyboard
+  // was first shown; plain `url` buttons must never be used (no initData).
+  const openButton = createMiniAppButton({
+    text: MENU_BUTTON_LABELS.openAlmas,
+    path: MINI_APP_PATHS.home,
+    baseUrl: webAppUrl,
+  });
+
+  if (!openButton) {
+    await sendMessageFn(chatId, "Mini App пока не подключён.", {
+      reply_markup: buildMainMenuKeyboard().reply_markup,
+    });
+    return;
+  }
+
+  await sendMessageFn(
+    chatId,
+    "🌐 Нажмите кнопку ниже, чтобы открыть ALMAS (авторизованная Mini App):",
+    {
+      reply_markup: {
+        inline_keyboard: [[openButton]],
+      },
+    }
+  );
 }
 
 export const HELP_ONBOARDING_MESSAGE = `❓ Как пользоваться ALMAS

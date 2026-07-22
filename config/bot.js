@@ -5,8 +5,12 @@ const bot = new TelegramBot(process.env.BOT_TOKEN, {
   polling: true,
 });
 
-// Restore the thin-inbox reply keyboard on every plain text reply
-// (skipped when the message already uses inline_keyboard or keyboard).
+/**
+ * Restore the thin-inbox reply keyboard on every plain text reply.
+ * Skipped when the message already uses inline_keyboard or keyboard —
+ * so Capture / Finance / Ideas web_app deep links are never overwritten
+ * or converted to plain url buttons.
+ */
 const originalSendMessage = bot.sendMessage.bind(bot);
 bot.sendMessage = function sendMessageWithPersistentKeyboard(
   chatId,

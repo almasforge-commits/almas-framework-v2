@@ -256,9 +256,16 @@ async function run() {
 
   await test("sendOpenAlmas shows a different message when a Web App URL is configured (edge case: label typed as text)", async () => {
     const sendMessageFn = spy();
-    await sendOpenAlmas("chat1", { sendMessageFn, webAppUrl: "https://app.almas.example" });
-    const [, text] = sendMessageFn.calls[0];
+    await sendOpenAlmas("chat1", {
+      sendMessageFn,
+      webAppUrl: "https://app.almas.example",
+      chatType: "private",
+    });
+    const [, text, extra] = sendMessageFn.calls[0];
     assert.notEqual(text, "Mini App пока не подключён.");
+    const btn = extra.reply_markup.inline_keyboard[0][0];
+    assert.ok(btn.web_app?.url);
+    assert.equal(btn.url, undefined);
   });
 
   await test("sendHelp sends concise onboarding with the main reply keyboard", async () => {

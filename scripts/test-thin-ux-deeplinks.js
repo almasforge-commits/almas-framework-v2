@@ -79,14 +79,14 @@ await test("deepLinks: buildMiniAppUrl joins path", () => {
 });
 
 await test("deepLinks: withMiniAppOpenButton appends when URL set", () => {
-  const prev = process.env.ALMAS_WEB_APP_URL;
-  process.env.ALMAS_WEB_APP_URL = "https://app.example.com";
-  // Module already loaded — button uses ALMAS_WEB_APP_URL from webapp import.
-  // Test pure helper with explicit path via buildMiniAppUrl.
-  const buttonMarkup = withMiniAppOpenButton({}, MINI_APP_PATHS.finance);
-  // Without https env baked at import, may be empty — still valid shape.
-  assert.ok(buttonMarkup.reply_markup.inline_keyboard);
-  process.env.ALMAS_WEB_APP_URL = prev;
+  const buttonMarkup = withMiniAppOpenButton({}, MINI_APP_PATHS.finance, "Open Finance →", {
+    baseUrl: "https://app.example.com",
+    chatType: "private",
+  });
+  const btn = buttonMarkup.reply_markup.inline_keyboard[0][0];
+  assert.ok(btn.web_app?.url);
+  assert.equal(btn.web_app.url, "https://app.example.com/finance");
+  assert.equal(btn.url, undefined);
 });
 
 await test("capture preview is thin counts", () => {
@@ -176,8 +176,15 @@ await test("AI memory confirmation is thin", () => {
 await test("capture keyboard includes review web_app when URL available", () => {
   const url = buildMiniAppUrl("/capture/abc", "https://mini.example.com");
   assert.ok(url?.includes("/capture/abc"));
-  const { reply_markup } = buildCaptureConfirmKeyboard({ sessionId: "abc" });
+  const { reply_markup } = buildCaptureConfirmKeyboard({
+    sessionId: "abc",
+    baseUrl: "https://mini.example.com",
+  });
   const flat = reply_markup.inline_keyboard.flat();
+  const review = flat.find((b) => b.web_app);
+  assert.ok(review);
+  assert.equal(review.web_app.url, "https://mini.example.com/capture/abc");
+  assert.equal(review.url, undefined);
   assert.ok(flat.some((b) => b.callback_data));
 });
 

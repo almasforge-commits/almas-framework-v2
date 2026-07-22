@@ -104,4 +104,5 @@ No PATCH/POST from the Mini App. Task checkboxes update local React state only i
    - `VITE_ALMAS_API_URL=https://<your-public-api-host>`
 4. Set API env `ALMAS_API_CORS_ORIGIN=https://almas-framework-v2-five.vercel.app` (exact Mini App origin).
 5. Set bot `ALMAS_WEB_APP_URL` to the Mini App HTTPS URL and restart the bot.
-6. Apply Supabase migration `0006_create_capture_sessions.sql` before relying on Capture review across bot/API processes.
+6. Configure BotFather Menu Button / Mini App domain (see [`docs/BOTFATHER_MINI_APP.md`](../docs/BOTFATHER_MINI_APP.md)). Open via `web_app` buttons only — plain links have no `initData`.
+7. Apply Supabase migration `0006_create_capture_sessions.sql` before relying on Capture review across bot/API processes.

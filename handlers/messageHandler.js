@@ -162,7 +162,8 @@ export async function routeText(chatId, text, from, options = {}) {
         userId: from?.id,
         actorKey: menuActor?.actorKey,
       }),
-    "🌐 открыть almas": () => sendOpenAlmas(chatId),
+    "🌐 открыть almas": () =>
+      sendOpenAlmas(chatId, { chatType: msg?.chat?.type }),
     "❓ как пользоваться": () => sendHelp(chatId),
     "❓ помощь": () => sendHelp(chatId),
   }[normalizedText];

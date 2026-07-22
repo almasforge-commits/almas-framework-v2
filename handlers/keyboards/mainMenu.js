@@ -1,6 +1,6 @@
 import { ALMAS_WEB_APP_URL } from "../../config/webapp.js";
 import {
-  buildMiniAppWebAppButton,
+  createMiniAppButton,
   MINI_APP_PATHS,
   THIN_CONFIRM,
 } from "../../config/deepLinks.js";
@@ -27,27 +27,28 @@ export const MENU_BUTTON_LABELS = {
 };
 
 function withMiniAppRow(path, rows, label = THIN_CONFIRM.openAlmas) {
-  const button = buildMiniAppWebAppButton(label, path);
+  const button = createMiniAppButton({ text: label, path });
   if (!button) return rows;
   return [[button], ...rows];
 }
 
 /**
  * Persistent thin-inbox reply keyboard (exactly two buttons).
- * "Открыть ALMAS" opens the Web App when ALMAS_WEB_APP_URL is set;
- * otherwise it is a plain text button handled by routeText → sendOpenAlmas.
+ * "Открыть ALMAS" is a real KeyboardButton.web_app when ALMAS_WEB_APP_URL
+ * is set — never a plain url button (url would open without initData).
+ * When unset, it is a plain text button handled by routeText → sendOpenAlmas.
  */
 export function buildMainMenuKeyboard() {
-  const openAlmasButton = ALMAS_WEB_APP_URL
-    ? { text: MENU_BUTTON_LABELS.openAlmas, web_app: { url: ALMAS_WEB_APP_URL } }
-    : { text: MENU_BUTTON_LABELS.openAlmas };
+  const openAlmasButton =
+    createMiniAppButton({
+      text: MENU_BUTTON_LABELS.openAlmas,
+      path: MINI_APP_PATHS.home,
+      baseUrl: ALMAS_WEB_APP_URL,
+    }) || { text: MENU_BUTTON_LABELS.openAlmas };
 
   return {
     reply_markup: {
-      keyboard: [
-        [openAlmasButton],
-        [{ text: MENU_BUTTON_LABELS.help }],
-      ],
+      keyboard: [[openAlmasButton], [{ text: MENU_BUTTON_LABELS.help }]],
       resize_keyboard: true,
       is_persistent: true,
     },
@@ -58,7 +59,8 @@ export function buildMainMenuKeyboard() {
  * Attach the persistent main reply keyboard when the outgoing message
  * does not already define reply_markup (inline or keyboard).
  * Inline-keyboard flows (Capture, category chips, deep links) are left
- * unchanged so navigation/capture context is not interrupted.
+ * unchanged — including any web_app buttons — so navigation/capture
+ * context is not interrupted or rewritten to plain url.
  *
  * @param {object} [extra]
  * @returns {object}

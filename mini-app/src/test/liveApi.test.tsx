@@ -167,12 +167,12 @@ describe("live API client", () => {
     expect(getApiDiagSnapshot().errorCategory).toBe("auth_required");
   });
 
-  it("retries once when initData appears after WebApp ready", async () => {
+  it("retries when initData appears after WebApp ready", async () => {
     let calls = 0;
     const initData = await resolveInitDataForRequest(() => {
       calls += 1;
       return calls >= 2 ? "raw-later" : null;
-    }, 5);
+    }, 5, 3);
     expect(initData).toBe("raw-later");
     expect(calls).toBe(2);
   });
@@ -358,7 +358,9 @@ describe("live API client", () => {
     const line = formatApiDiagLine({
       apiMode: "live",
       apiHost: "web-production-6d53b.up.railway.app",
+      telegramSdkPresent: true,
       initDataPresent: true,
+      launchPlatform: "tdesktop",
       endpoint: "/api/finance/summary",
       fetchAttempted: true,
       responseStatus: 200,
@@ -366,7 +368,9 @@ describe("live API client", () => {
     });
     expect(line).toContain("apiMode=live");
     expect(line).toContain("apiHost=web-production-6d53b.up.railway.app");
+    expect(line).toContain("telegramSdkPresent=true");
     expect(line).toContain("initDataPresent=true");
+    expect(line).toContain("launchPlatform=tdesktop");
     expect(line).not.toMatch(/tma /);
     expect(line).not.toMatch(/BOT_TOKEN/);
     expect(line).not.toMatch(/auth_date=/);

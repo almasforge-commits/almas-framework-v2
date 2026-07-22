@@ -10,8 +10,10 @@ export interface LiveHttpDeps {
   baseUrl: string;
   fetchFn?: FetchLike;
   getInitData?: () => string | null;
-  /** Test-only: skip initData retry delay. */
+  /** Test-only: skip / shorten initData retry delay. */
   initDataRetryMs?: number;
+  /** Test-only: bound initData poll attempts (default 4). */
+  initDataAttempts?: number;
 }
 
 function buildAuthHeader(initData: string): string {
@@ -23,20 +25,25 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Read initData after ensuring WebApp.ready(). Retry once if temporarily empty
- * (Telegram WebView can expose the bridge slightly after first paint).
+ * Read initData after ensuring WebApp.ready().
+ * Bounded retries help Telegram Desktop when the bridge fills initData
+ * slightly after first paint.
  */
 export async function resolveInitDataForRequest(
   getInitData: () => string | null,
-  retryMs = 50
+  retryMs = 50,
+  attempts = 3
 ): Promise<string | null> {
-  initTelegramWebApp();
-  const first = getInitData();
-  if (first) return first;
-  if (retryMs <= 0) return null;
-  await sleep(retryMs);
-  initTelegramWebApp();
-  return getInitData();
+  const maxAttempts = Math.max(1, attempts);
+  for (let i = 0; i < maxAttempts; i += 1) {
+    initTelegramWebApp();
+    const value = getInitData();
+    if (value) return value;
+    if (i < maxAttempts - 1 && retryMs > 0) {
+      await sleep(retryMs);
+    }
+  }
+  return null;
 }
 
 function pathOnly(path: string): string {
@@ -71,8 +78,13 @@ export async function liveGetJson<T>(
   }
 
   const getInitData = deps.getInitData ?? getRawInitData;
-  const retryMs = deps.initDataRetryMs ?? 50;
-  const initData = await resolveInitDataForRequest(getInitData, retryMs);
+  const retryMs = deps.initDataRetryMs ?? 100;
+  const attempts = deps.initDataAttempts ?? (retryMs <= 0 ? 1 : 4);
+  const initData = await resolveInitDataForRequest(
+    getInitData,
+    retryMs,
+    attempts
+  );
 
   if (!initData) {
     recordApiDiag({
@@ -206,8 +218,13 @@ export async function liveSendJson<T>(
   }
 
   const getInitData = deps.getInitData ?? getRawInitData;
-  const retryMs = deps.initDataRetryMs ?? 50;
-  const initData = await resolveInitDataForRequest(getInitData, retryMs);
+  const retryMs = deps.initDataRetryMs ?? 100;
+  const attempts = deps.initDataAttempts ?? (retryMs <= 0 ? 1 : 4);
+  const initData = await resolveInitDataForRequest(
+    getInitData,
+    retryMs,
+    attempts
+  );
 
   if (!initData) {
     recordApiDiag({

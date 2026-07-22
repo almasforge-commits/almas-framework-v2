@@ -1,11 +1,11 @@
 /**
  * Inline keyboard for Capture Session — thin Telegram UX.
- * Detail review opens in Mini App when ALMAS_WEB_APP_URL is set.
+ * Detail review opens via web_app (never plain url) when ALMAS_WEB_APP_URL is set.
  */
 
 import { CAPTURE_CALLBACK } from "../../services/capture/captureContracts.js";
 import {
-  buildMiniAppWebAppButton,
+  createMiniAppButton,
   capturePath,
   THIN_CONFIRM,
 } from "../../config/deepLinks.js";
@@ -13,13 +13,18 @@ import {
 /**
  * @param {object} [opts]
  * @param {string|null} [opts.sessionId]
+ * @param {string|null} [opts.baseUrl]
  * @returns {{ reply_markup: object }}
  */
 export function buildCaptureConfirmKeyboard(opts = {}) {
   const rows = [];
 
   const review = opts.sessionId
-    ? buildMiniAppWebAppButton(THIN_CONFIRM.review, capturePath(opts.sessionId))
+    ? createMiniAppButton({
+        text: THIN_CONFIRM.review,
+        path: capturePath(opts.sessionId),
+        baseUrl: opts.baseUrl,
+      })
     : null;
   if (review) {
     rows.push([review]);
