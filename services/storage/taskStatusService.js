@@ -1,7 +1,12 @@
 import { supabase } from "../../providers/storage/supabase.js";
 
-export async function updateTaskStatus(taskId, status) {
-  // Read only the fields we need — never select every column into a log path.
+/**
+ * Update task status with optional actor scope (metadata.userId).
+ * @param {string} taskId
+ * @param {string} status
+ * @param {{ userId?: string|null }} [opts]
+ */
+export async function updateTaskStatus(taskId, status, opts = {}) {
   const { data: task, error: readError } = await supabase
     .from("memories")
     .select("id, content, metadata")
@@ -9,6 +14,16 @@ export async function updateTaskStatus(taskId, status) {
     .single();
 
   if (readError || !task) {
+    return null;
+  }
+
+  const owner =
+    task.metadata?.userId != null
+      ? String(task.metadata.userId)
+      : task.metadata?.telegramUserId != null
+        ? String(task.metadata.telegramUserId)
+        : null;
+  if (opts.userId && owner && owner !== String(opts.userId)) {
     return null;
   }
 
@@ -23,13 +38,15 @@ export async function updateTaskStatus(taskId, status) {
     .eq("id", taskId)
     .select("id");
 
-  // Concise metadata only — never log the full returned database row.
   console.log(
     `[task] action=update_status id=${taskId} status=${status} rows=${data?.length ?? 0} ok=${!updateError}`
   );
 
   if (updateError) {
-    console.error(`[task] update_status failed id=${taskId}:`, updateError.message || updateError);
+    console.error(
+      `[task] update_status failed id=${taskId}:`,
+      updateError.message || updateError
+    );
     return null;
   }
 

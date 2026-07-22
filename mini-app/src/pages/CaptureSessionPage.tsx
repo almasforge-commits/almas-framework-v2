@@ -23,11 +23,16 @@ const TYPE_LABELS: Record<string, string> = {
 
 const CATEGORY_OPTIONS = [
   "",
-  "food",
-  "transport",
-  "coffee",
-  "shopping",
-  "salary",
+  "Напитки",
+  "Кафе",
+  "Продукты",
+  "Транспорт",
+  "Развлечения",
+  "Здоровье",
+  "Одежда",
+  "Подписки",
+  "Техника",
+  "Доход",
   "other",
 ];
 

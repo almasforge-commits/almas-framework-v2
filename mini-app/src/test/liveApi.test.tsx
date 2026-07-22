@@ -189,32 +189,44 @@ describe("live API client", () => {
     const fetchFn: typeof fetch = async (input, init) => {
       calls.push(String(input));
       auths.push(String((init?.headers as Record<string, string>).Authorization));
+      const url = String(input);
       const isList = /\/api\/(inbox|tasks|knowledge|finance\/transactions|memory|ideas)/.test(
-        String(input)
+        url
       );
-      return new Response(
-        JSON.stringify({
-          data: isList
-            ? []
-            : String(input).includes("/api/finance/summary")
-              ? {
-                  balance: 1,
-                  incomeMonth: 2,
-                  expensesMonth: 3,
-                  currency: "VND",
-                  period: "month",
-                  demo: false,
-                }
-              : {
-                  summary: {},
-                  todayActivity: [],
-                  recentTasks: [],
-                  recentKnowledge: [],
-                  recentActions: [],
-                },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
+      let data: unknown = {
+        summary: {},
+        todayActivity: [],
+        recentTasks: [],
+        recentKnowledge: [],
+        recentActions: [],
+      };
+      if (isList) data = [];
+      else if (url.includes("/api/finance/overview")) {
+        data = {
+          summary: {
+            balance: 1,
+            incomeMonth: 2,
+            expensesMonth: 3,
+            currency: "VND",
+            period: "month",
+            demo: false,
+          },
+          transactions: [],
+        };
+      } else if (url.includes("/api/finance/summary")) {
+        data = {
+          balance: 1,
+          incomeMonth: 2,
+          expensesMonth: 3,
+          currency: "VND",
+          period: "month",
+          demo: false,
+        };
+      }
+      return new Response(JSON.stringify({ data }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     };
 
     const api = createRealApi({
@@ -228,6 +240,7 @@ describe("live API client", () => {
     await api.getInbox();
     await api.getFinanceSummary("month");
     await api.getFinanceTransactions("month");
+    await api.getFinanceOverview("month");
     await api.getTasks();
     await api.getKnowledge();
     await api.getMemory();
@@ -238,6 +251,7 @@ describe("live API client", () => {
       "https://web-production-6d53b.up.railway.app/api/inbox",
       "https://web-production-6d53b.up.railway.app/api/finance/summary?period=month",
       "https://web-production-6d53b.up.railway.app/api/finance/transactions?period=month",
+      "https://web-production-6d53b.up.railway.app/api/finance/overview?period=month",
       "https://web-production-6d53b.up.railway.app/api/tasks",
       "https://web-production-6d53b.up.railway.app/api/knowledge",
       "https://web-production-6d53b.up.railway.app/api/memory",
@@ -404,19 +418,19 @@ describe("live API client", () => {
 describe("FinancePage mount → API", () => {
   it("FinancePage mount calls apiClient finance getters (spy)", async () => {
     const apiClientMod = await import("../api/apiClient");
-    const summarySpy = vi
-      .spyOn(apiClientMod.apiClient, "getFinanceSummary")
+    const overviewSpy = vi
+      .spyOn(apiClientMod.apiClient, "getFinanceOverview")
       .mockResolvedValue({
-        balance: 100,
-        incomeMonth: 50,
-        expensesMonth: 20,
-        currency: "VND",
-        period: "month",
-        demo: false,
+        summary: {
+          balance: 100,
+          incomeMonth: 50,
+          expensesMonth: 20,
+          currency: "VND",
+          period: "month",
+          demo: false,
+        },
+        transactions: [],
       });
-    const txSpy = vi
-      .spyOn(apiClientMod.apiClient, "getFinanceTransactions")
-      .mockResolvedValue([]);
 
     render(
       <MemoryRouter initialEntries={["/finance"]}>
@@ -427,24 +441,21 @@ describe("FinancePage mount → API", () => {
     );
 
     await waitFor(() => {
-      expect(summarySpy).toHaveBeenCalledWith("month");
-      expect(txSpy).toHaveBeenCalledWith("month");
+      expect(overviewSpy).toHaveBeenCalledWith("month");
     });
 
     expect(await screen.findByText("Финансы")).toBeInTheDocument();
-    summarySpy.mockRestore();
-    txSpy.mockRestore();
+    overviewSpy.mockRestore();
   });
 
   it("FinancePage in live path with realApi issues Railway finance URLs", async () => {
     const calls: string[] = [];
     const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
       calls.push(String(input));
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return new Response(
-          JSON.stringify({
-            data: {
+      return new Response(
+        JSON.stringify({
+          data: {
+            summary: {
               balance: 1,
               incomeMonth: 1,
               expensesMonth: 1,
@@ -452,14 +463,11 @@ describe("FinancePage mount → API", () => {
               period: "month",
               demo: false,
             },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
-      }
-      return new Response(JSON.stringify({ data: [] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+            transactions: [],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
     });
 
     const live = createRealApi({
@@ -470,12 +478,9 @@ describe("FinancePage mount → API", () => {
     });
 
     const apiClientMod = await import("../api/apiClient");
-    const summarySpy = vi
-      .spyOn(apiClientMod.apiClient, "getFinanceSummary")
-      .mockImplementation((period) => live.getFinanceSummary(period));
-    const txSpy = vi
-      .spyOn(apiClientMod.apiClient, "getFinanceTransactions")
-      .mockImplementation((period) => live.getFinanceTransactions(period));
+    const overviewSpy = vi
+      .spyOn(apiClientMod.apiClient, "getFinanceOverview")
+      .mockImplementation((period) => live.getFinanceOverview(period));
 
     render(
       <MemoryRouter initialEntries={["/finance"]}>
@@ -487,10 +492,10 @@ describe("FinancePage mount → API", () => {
 
     await waitFor(() => expect(fetchFn).toHaveBeenCalled());
     expect(calls).toContain(
-      "https://web-production-6d53b.up.railway.app/api/finance/summary?period=month"
+      "https://web-production-6d53b.up.railway.app/api/finance/overview?period=month"
     );
-    expect(calls).toContain(
-      "https://web-production-6d53b.up.railway.app/api/finance/transactions?period=month"
+    expect(calls).not.toContain(
+      "https://web-production-6d53b.up.railway.app/api/finance/summary?period=month"
     );
     const firstCall = fetchFn.mock.calls[0] as
       | [RequestInfo | URL, RequestInit?]
@@ -498,16 +503,12 @@ describe("FinancePage mount → API", () => {
     const auth = (firstCall?.[1]?.headers ?? {}) as Record<string, string>;
     expect(auth.Authorization).toBe("tma query_id=1&hash=x");
 
-    summarySpy.mockRestore();
-    txSpy.mockRestore();
+    overviewSpy.mockRestore();
   });
 
   it("FinancePage surfaces network error (no silent mock data)", async () => {
     const apiClientMod = await import("../api/apiClient");
-    vi.spyOn(apiClientMod.apiClient, "getFinanceSummary").mockRejectedValue(
-      new ApiError("network", "Network request failed", { retryable: true })
-    );
-    vi.spyOn(apiClientMod.apiClient, "getFinanceTransactions").mockRejectedValue(
+    vi.spyOn(apiClientMod.apiClient, "getFinanceOverview").mockRejectedValue(
       new ApiError("network", "Network request failed", { retryable: true })
     );
 
@@ -525,13 +526,7 @@ describe("FinancePage mount → API", () => {
 
   it("FinancePage missing initData shows auth-required, not demo fixtures", async () => {
     const apiClientMod = await import("../api/apiClient");
-    vi.spyOn(apiClientMod.apiClient, "getFinanceSummary").mockRejectedValue(
-      new ApiError("auth_required", "Telegram initData is required", {
-        status: 401,
-        retryable: false,
-      })
-    );
-    vi.spyOn(apiClientMod.apiClient, "getFinanceTransactions").mockRejectedValue(
+    vi.spyOn(apiClientMod.apiClient, "getFinanceOverview").mockRejectedValue(
       new ApiError("auth_required", "Telegram initData is required", {
         status: 401,
         retryable: false,

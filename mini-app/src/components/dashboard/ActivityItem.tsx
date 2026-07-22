@@ -22,6 +22,14 @@ export const ActivityItemView = memo(function ActivityItemView({
 }: {
   item: ActivityItem;
 }) {
+  const badge = KIND_BADGE[item.kind] ?? item.kind;
+  const subtitle = String(item.subtitle || "").trim();
+  // Avoid "Финансы Финансы" / "Идея Идея" double labels.
+  const showSubtitle =
+    Boolean(subtitle) &&
+    subtitle.toLowerCase() !== badge.toLowerCase() &&
+    subtitle.toLowerCase() !== String(item.kind).toLowerCase();
+
   return (
     <li className="dashboard-activity flex min-h-11 items-start gap-3 rounded-xl px-1 py-2 transition-colors duration-200">
       <span
@@ -39,10 +47,10 @@ export const ActivityItemView = memo(function ActivityItemView({
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2">
           <span className="inline-flex rounded-md bg-tg-bg px-1.5 py-0.5 text-[10px] font-medium text-tg-hint">
-            {KIND_BADGE[item.kind] ?? item.kind}
+            {badge}
           </span>
-          {item.subtitle ? (
-            <span className="truncate text-xs text-tg-hint">{item.subtitle}</span>
+          {showSubtitle ? (
+            <span className="truncate text-xs text-tg-hint">{subtitle}</span>
           ) : null}
         </div>
       </div>

@@ -14,6 +14,7 @@ import {
 import { aggregateFinanceInBase } from "../../services/fx/aggregateFinance.js";
 import { resolveBaseCurrency } from "../../services/fx/resolveBaseCurrency.js";
 import { createFxProviderFromEnv } from "../../services/fx/fxProvider.js";
+import { normalizeCurrencyCode } from "../../services/finance/normalizeCurrency.js";
 
 function periodToDays(period) {
   if (period === "today") return 1;
@@ -24,8 +25,9 @@ function periodToDays(period) {
 function startOfPeriod(period, now = new Date()) {
   const d = new Date(now);
   if (period === "today") {
-    d.setHours(0, 0, 0, 0);
-    return d;
+    // Use a 36h window so UTC midnight on Railway does not drop
+    // same-calendar-day local (UTC+7) transactions from Dashboard.
+    return new Date(now.getTime() - 36 * 60 * 60 * 1000);
   }
   if (period === "week") {
     d.setDate(d.getDate() - 7);
@@ -110,9 +112,14 @@ export function createFinanceReader(deps = {}) {
 
   async function summarize(rows, period, actor) {
     try {
+      const normalizedRows = (rows || []).map((row) => ({
+        ...row,
+        currency: normalizeCurrencyCode(row.currency),
+      }));
+
       const balances = {};
-      for (const row of rows) {
-        const currency = String(row.currency || "VND");
+      for (const row of normalizedRows) {
+        const currency = row.currency;
         if (!balances[currency]) {
           balances[currency] = { income: 0, expense: 0, balance: 0 };
         }
@@ -128,7 +135,7 @@ export function createFinanceReader(deps = {}) {
         profileBaseCurrency: deps.profileBaseCurrency,
       });
 
-      const fx = await aggregateFinanceInBase(rows, {
+      const fx = await aggregateFinanceInBase(normalizedRows, {
         baseCurrency,
         getRate: (from, to, at) => fxProvider.getRate(from, to, at),
         log: (line) => {
@@ -137,25 +144,20 @@ export function createFinanceReader(deps = {}) {
         },
       });
 
-      let incomeMonth = 0;
-      let expensesMonth = 0;
-      const legacyCurrency = balances[baseCurrency]
-        ? baseCurrency
-        : Object.keys(balances)[0] || baseCurrency;
-      for (const row of rows) {
-        if (String(row.currency || "VND") !== legacyCurrency) continue;
-        if (row.type === "income") incomeMonth += Number(row.amount) || 0;
-        if (row.type === "expense") expensesMonth += Number(row.amount) || 0;
-      }
+      // Never fall back to single-currency incomeMonth when FX produced a base total.
+      const incomeMonth = Number(fx.incomeBase) || 0;
+      const expensesMonth = Number(fx.expenseBase) || 0;
 
       return mapFinanceSummary({
         balances,
         incomeMonth:
-          fx.fxStatus === "unavailable" ? incomeMonth : fx.incomeBase ?? incomeMonth,
+          fx.fxStatus === "unavailable" && fx.incomeBase == null
+            ? Number(balances[baseCurrency]?.income) || 0
+            : incomeMonth,
         expensesMonth:
-          fx.fxStatus === "unavailable"
-            ? expensesMonth
-            : fx.expenseBase ?? expensesMonth,
+          fx.fxStatus === "unavailable" && fx.expenseBase == null
+            ? Number(balances[baseCurrency]?.expense) || 0
+            : expensesMonth,
         period,
         currency: baseCurrency,
         baseCurrency: fx.baseCurrency,
@@ -176,7 +178,76 @@ export function createFinanceReader(deps = {}) {
     }
   }
 
+  function dedupeRows(rows) {
+    const seen = new Set();
+    const out = [];
+    for (const row of rows || []) {
+      const id = row?.id != null ? String(row.id) : null;
+      if (id) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
   return {
+    /**
+     * Single DB+FX pass for Dashboard — avoids double getSummary waterfall.
+     */
+    async getDashboardBundle(actor) {
+      const t0 = Date.now();
+      const userId = requireUserId(actor);
+      // Month window for totals so multi-currency income is not clipped by
+      // UTC "today"; recent list still capped to 5 rows.
+      const rows = dedupeRows(await loadRows(userId, "month", 200));
+      const summary = await summarize(rows, "month", actor);
+      const transactions = rows.slice(0, 5).map((row) =>
+        mapFinanceTransaction({
+          ...row,
+          currency: normalizeCurrencyCode(row.currency),
+        })
+      );
+      if (typeof log === "function") {
+        log(`[finance-api] operation=dashboard_bundle`);
+        log(`[finance-api] summary_ms=${Date.now() - t0}`);
+        log(`[finance-api] rowCount=${rows.length}`);
+        log(
+          `[finance-api] incomeBase=${summary.incomeBase} expenseBase=${summary.expenseBase} balanceBase=${summary.balanceBase} fxStatus=${summary.fxStatus}`
+        );
+      }
+      return { summary, transactions };
+    },
+
+    /**
+     * Single round-trip for Finance page (summary + transactions).
+     */
+    async getOverview(actor, period = "month", { limit = 20, offset = 0 } = {}) {
+      const t0 = Date.now();
+      const userId = requireUserId(actor);
+      const rows = dedupeRows(await loadRows(userId, period, 500));
+      const summary = await summarize(rows, period, actor);
+      const page = rows.slice(offset, offset + limit + 1);
+      const hasMore = page.length > limit;
+      const items = (hasMore ? page.slice(0, limit) : page).map((row) =>
+        mapFinanceTransaction({
+          ...row,
+          currency: normalizeCurrencyCode(row.currency),
+        })
+      );
+      if (typeof log === "function") {
+        log(`[finance-api] operation=overview`);
+        log(`[finance-api] overview_ms=${Date.now() - t0}`);
+        log(`[finance-api] rowCount=${rows.length}`);
+      }
+      return {
+        summary,
+        items,
+        meta: { limit, offset, hasMore },
+      };
+    },
+
     async getSettings(actor) {
       const baseCurrency = await resolveBaseCurrencyFn(actor, {
         getPreferenceFn: getBaseCurrencyPreferenceFn,
@@ -251,7 +322,7 @@ export function createFinanceReader(deps = {}) {
         }
 
         const rows = await loadRows(userId, period, 500);
-        const summary = await summarize(rows, period, actor);
+        const summary = await summarize(dedupeRows(rows), period, actor);
         logFinanceDiag(log, {
           operation: "summary",
           queryOk: true,
@@ -300,7 +371,7 @@ export function createFinanceReader(deps = {}) {
         });
 
         const fetchLimit = Math.min(offset + limit + 1, 200);
-        const filtered = await loadRows(userId, period, fetchLimit);
+        const filtered = dedupeRows(await loadRows(userId, period, fetchLimit));
         const page = filtered.slice(offset, offset + limit + 1);
         const hasMore = page.length > limit;
         let items;

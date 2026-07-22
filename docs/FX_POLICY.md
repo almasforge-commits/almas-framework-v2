@@ -1,52 +1,47 @@
 # Multi-currency FX (Finance summaries)
 
+## Root cause (2026-07 production)
+
+Logs showed `baseCurrency=KZT`, `status=partial`, `rateCount=0`, `cacheHit=false`.
+
+**Why:**
+
+1. Default provider was `none` (no HTTP, no rates) — only same-currency KZT rows entered totals.
+2. Even with `FX_PROVIDER=frankfurter`, **Frankfurter/ECB does not support KZT or VND** (HTTP 404). Only majors like EUR↔USD work.
+
+## Fix
+
+- Default provider: **`open-er-api`** (`https://open.er-api.com/v6/latest/USD`) — free, no API key, includes KZT + VND.
+- One HTTP call loads a full USD rate table; any pair converts via USD pivot.
+- Table + pair caches → second request reports `cacheHit=true`, `rateCount>0`, `status=ok`.
+- `FX_PROVIDER=frankfurter` now composites with open-er-api (Frankfurter alone cannot price KZT/VND).
+
 ## Policy
 
-1. **Original transactions are never rewritten.** Amounts/currencies in `finance_transactions` stay as captured.
-2. **Conversion is for summaries/analytics only** (`/api/finance/summary`, Dashboard totals).
-3. **Current period / Dashboard** uses the **latest cached** exchange rate for the day.
-4. **Historical reports** (when supported) should use the closest `effective_at <= transaction date`.
-5. Generated analytics may include `ratesUsed[]` / `ratesUpdatedAt` on the summary DTO.
+1. Original transactions are never rewritten.
+2. Conversion is for summaries/analytics only.
+3. Dashboard / current period uses latest cached rates.
+4. Historical reports should use closest `effective_at <= transaction date` when dated rates exist.
 
 ## Base currency resolution
 
-Priority:
+1. `actor_finance_settings.base_currency`
+2. Profile override
+3. `FINANCE_DEFAULT_BASE_CURRENCY` / `FX_DEFAULT_BASE_CURRENCY`
+4. Default **VND**
 
-1. Saved preference in `actor_finance_settings.base_currency` (when migration applied + loader wired)
-2. Injected finance profile setting
-3. Env `FINANCE_DEFAULT_BASE_CURRENCY` or `FX_DEFAULT_BASE_CURRENCY`
-4. Documented default: **VND**
-
-Never infer base currency solely from the last transaction.
-
-## Provider / cache
+## Env
 
 | Env | Meaning |
 |---|---|
-| `FX_PROVIDER=none` | Default. No external calls. Multi-currency → `fxStatus=unavailable` or `partial` honestly. |
-| `FX_PROVIDER=test` | Deterministic in-process rates (tests / staging). No network. |
-| `FX_PROVIDER=frankfurter` | Optional live ECB-based rates via Frankfurter (server-side only, no API key). |
-| `FX_TEST_RATES` | Optional overrides for test provider, e.g. `USD:KZT:450,USD:VND:25000` |
-| `FINANCE_DEFAULT_BASE_CURRENCY` | Default reporting currency (default `VND`) |
-
-Rates are cached in-process (`services/fx/fxCache.js`). Do not call an external provider once per transaction.
-
-## Status honesty
-
-- `ok` — all currencies convertible (or single currency)
-- `partial` — some currencies converted; others missing rates (warning in UI)
-- `unavailable` — no usable rates for foreign currencies; **do not fake a combined total**
-
-## Migration
-
-File: `supabase/migrations/0007_actor_finance_settings_and_fx_rates.sql`
-
-Apply manually in Supabase SQL editor (do not auto-apply from the bot).
+| `FX_PROVIDER=open-er-api` | Default live provider (KZT/VND/USD/…) |
+| `FX_PROVIDER=frankfurter` | Composites open-er-api + Frankfurter |
+| `FX_PROVIDER=test` | Deterministic in-process rates |
+| `FX_PROVIDER=none` | No conversion (honest partial/unavailable) |
+| `FINANCE_DEFAULT_BASE_CURRENCY` | Reporting currency |
 
 ## API
 
-- `GET /api/finance/summary` — includes `baseCurrency`, `incomeBase`, `expenseBase`, `balanceBase`, `originalCurrencyTotals`, `fxStatus`, `ratesUpdatedAt`
-- `GET /api/finance/settings` — read-only settings hook (`baseCurrency`, `source`)
-- `GET /api/dashboard` — summary includes `baseCurrency`, `fxStatus`, converted `expensesToday`
-
-Transaction list endpoints are unchanged (original currency per row).
+- `GET /api/finance/summary` — `baseCurrency`, `incomeBase`, `expenseBase`, `balanceBase`, `originalCurrencyTotals`, `fxStatus`, `ratesUpdatedAt`
+- `GET /api/finance/settings`
+- Dashboard uses **one** finance bundle (today summary + recent txs), not double summary.

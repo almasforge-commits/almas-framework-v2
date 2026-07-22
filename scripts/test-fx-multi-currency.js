@@ -250,5 +250,27 @@ await test("createFxProviderFromEnv none is default-safe", async () => {
   assert.equal(await provider.getRate("USD", "KZT"), null);
 });
 
+await test("open-er-api via frankfurter alias composites live rates", async () => {
+  clearFxCache();
+  const fetchFn = async (url) => {
+    if (String(url).includes("frankfurter")) {
+      return { ok: false, status: 404, async json() { return {}; } };
+    }
+    return {
+      ok: true,
+      async json() {
+        return { result: "success", rates: { KZT: 450, VND: 25000 } };
+      },
+    };
+  };
+  const provider = createFxProviderFromEnv({
+    provider: "frankfurter",
+    fetchFn,
+  });
+  const q = await provider.getRate("USD", "KZT");
+  assert.ok(q);
+  assert.equal(q.rate, 450);
+});
+
 console.log(`\nPassed: ${passed}, Failed: ${failed}`);
 process.exit(failed ? 1 : 0);

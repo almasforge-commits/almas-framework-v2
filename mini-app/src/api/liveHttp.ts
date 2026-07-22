@@ -168,9 +168,11 @@ export async function liveGetJson<T>(
   try {
     response = await fetchFn(url, {
       method: "GET",
+      cache: "no-store",
       headers: {
         Accept: "application/json",
         Authorization: authorization,
+        "Cache-Control": "no-cache",
       },
     });
   } catch {
@@ -303,10 +305,12 @@ export async function liveSendJson<T>(
   try {
     response = await fetchFn(url, {
       method,
+      cache: "no-store",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
         Authorization: buildAuthHeader(initData),
+        "Cache-Control": "no-cache",
       },
       body: JSON.stringify(body ?? {}),
     });

@@ -2,12 +2,10 @@ import { memo, useMemo } from "react";
 import type { DashboardSummary } from "../../api/apiTypes";
 import { DashboardCard } from "./DashboardCard";
 
-function formatExpenses(summary: DashboardSummary): string {
-  const currency = summary.baseCurrency || summary.expensesTodayCurrency;
-  const value = `${summary.expensesToday.toLocaleString("ru-RU")} ${currency}`;
-  if (summary.fxStatus === "partial") return `${value} · частично`;
-  if (summary.fxStatus === "unavailable") return `${value} · без курса`;
-  return value;
+function formatMoney(amount: number, currency: string): string {
+  const n = Number(amount);
+  const safe = Number.isFinite(n) ? n : 0;
+  return `${safe.toLocaleString("ru-RU")} ${currency}`;
 }
 
 export const StatsGrid = memo(function StatsGrid({
@@ -15,21 +13,41 @@ export const StatsGrid = memo(function StatsGrid({
 }: {
   summary: DashboardSummary;
 }) {
+  const currency = summary.baseCurrency || summary.expensesTodayCurrency;
+  const income = Number(summary.incomeToday ?? 0);
+  const expense = Number(summary.expensesToday ?? 0);
+  const balance = Number(
+    summary.balanceToday ?? income - expense
+  );
+
   const cards = useMemo(
     () => [
       {
+        key: "balance",
+        icon: "💼",
+        title: `Баланс в ${currency}`,
+        value: formatMoney(balance, currency),
+        subtitle: "Все валюты после конвертации",
+        to: "/finance",
+        ariaLabel: `Баланс: ${formatMoney(balance, currency)}`,
+      },
+      {
+        key: "income",
+        icon: "💵",
+        title: `Доход в ${currency}`,
+        value: formatMoney(income, currency),
+        subtitle: "С учётом USD / VND / KZT",
+        to: "/finance",
+        ariaLabel: `Доход: ${formatMoney(income, currency)}`,
+      },
+      {
         key: "expenses",
         icon: "💰",
-        title: `Расходы в ${summary.baseCurrency || summary.expensesTodayCurrency}`,
-        value: formatExpenses(summary),
-        subtitle:
-          summary.fxStatus === "unavailable"
-            ? "Курсы недоступны"
-            : summary.fxStatus === "partial"
-              ? "Часть валют без курса"
-              : "За текущий день",
+        title: `Расход в ${currency}`,
+        value: formatMoney(expense, currency),
+        subtitle: "С учётом всех валют",
         to: "/finance",
-        ariaLabel: `Расходы сегодня: ${formatExpenses(summary)}`,
+        ariaLabel: `Расход: ${formatMoney(expense, currency)}`,
       },
       {
         key: "tasks",
@@ -40,26 +58,8 @@ export const StatsGrid = memo(function StatsGrid({
         to: "/tasks",
         ariaLabel: `Активные задачи: ${summary.activeTasks}`,
       },
-      {
-        key: "knowledge",
-        icon: "📚",
-        title: "Знания",
-        value: String(summary.newKnowledge),
-        subtitle: "Новые объекты",
-        to: "/knowledge",
-        ariaLabel: `Знания: ${summary.newKnowledge}`,
-      },
-      {
-        key: "ideas",
-        icon: "💡",
-        title: "Идеи",
-        value: String(summary.inboxToday),
-        subtitle: "Inbox сегодня",
-        to: "/inbox",
-        ariaLabel: `Идеи и объекты Inbox сегодня: ${summary.inboxToday}`,
-      },
     ],
-    [summary]
+    [summary.activeTasks, balance, currency, expense, income]
   );
 
   return (

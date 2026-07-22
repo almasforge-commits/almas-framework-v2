@@ -13,7 +13,7 @@ const FORBIDDEN_IMPORT_SNIPPETS = [
   "routingDecisionService",
   "inboxObservation",
   "universalExtractor",
-  "taskStatusService",
+  // taskStatusService is allowed: Mini App PATCH /api/tasks/:id (actor-scoped).
   "taskUpdateService",
   "memoryService",
   "addExpense",

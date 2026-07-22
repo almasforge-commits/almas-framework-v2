@@ -191,11 +191,18 @@ export interface HomePayload {
   recentActions: ActivityItem[];
 }
 
+export interface FinanceOverview {
+  summary: FinanceSummary;
+  transactions: FinanceTransaction[];
+}
+
 export interface AlmasApiClient {
   getDashboard(greetingName: string | null): Promise<HomePayload>;
   getInbox(): Promise<InboxItem[]>;
   getFinanceSummary(period: FinancePeriod): Promise<FinanceSummary>;
   getFinanceTransactions(period: FinancePeriod): Promise<FinanceTransaction[]>;
+  /** Single SQL+FX pass — preferred over summary+transactions waterfall. */
+  getFinanceOverview(period: FinancePeriod): Promise<FinanceOverview>;
   getFinanceSettings(): Promise<FinanceSettings>;
   getTasks(): Promise<Task[]>;
   patchTask(id: string, patch: { completed: boolean }): Promise<Task | null>;

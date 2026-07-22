@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/apiClient";
 import type {
   FinancePeriod,
   FinanceSummary,
   FinanceTransaction,
+  OriginalCurrencyTotal,
 } from "../api/apiTypes";
 import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
 import { DemoNotice } from "../components/DemoNotice";
@@ -15,10 +16,75 @@ import { SectionCard } from "../components/SectionCard";
 import { isMockMode } from "../config/env";
 
 const PERIODS: Array<{ id: FinancePeriod; label: string }> = [
-  { id: "today", label: "Today" },
-  { id: "week", label: "Week" },
-  { id: "month", label: "Month" },
+  { id: "today", label: "Сегодня" },
+  { id: "week", label: "Неделя" },
+  { id: "month", label: "Месяц" },
 ];
+
+function money(amount: number, currency: string) {
+  return `${amount.toLocaleString("ru-RU")} ${currency}`;
+}
+
+function CurrencyBreakdown({
+  totals,
+}: {
+  totals: OriginalCurrencyTotal[];
+}) {
+  const incomeRows = totals.filter((row) => row.income > 0);
+  const expenseRows = totals.filter((row) => row.expense > 0);
+  if (!incomeRows.length && !expenseRows.length) return null;
+
+  return (
+    <SectionCard title="В том числе">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-tg-hint">
+            Доходы
+          </p>
+          {incomeRows.length === 0 ? (
+            <p className="mt-2 text-sm text-tg-hint">Нет доходов</p>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {incomeRows.map((row) => (
+                <li
+                  key={`in-${row.currency}`}
+                  className="flex justify-between gap-3 text-sm text-tg-text"
+                >
+                  <span>{row.currency}</span>
+                  <span className="tabular-nums font-medium text-emerald-600">
+                    {money(row.income, row.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-tg-hint">
+            Расходы
+          </p>
+          {expenseRows.length === 0 ? (
+            <p className="mt-2 text-sm text-tg-hint">Нет расходов</p>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {expenseRows.map((row) => (
+                <li
+                  key={`ex-${row.currency}`}
+                  className="flex justify-between gap-3 text-sm text-tg-text"
+                >
+                  <span>{row.currency}</span>
+                  <span className="tabular-nums font-medium">
+                    {money(row.expense, row.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
 
 export function FinancePage() {
   const [period, setPeriod] = useState<FinancePeriod>("month");
@@ -30,13 +96,20 @@ export function FinancePage() {
   const load = () => {
     setLoading(true);
     setErrorUi(null);
-    Promise.all([
-      apiClient.getFinanceSummary(period),
-      apiClient.getFinanceTransactions(period),
-    ])
-      .then(([nextSummary, nextTx]) => {
-        setSummary(nextSummary);
-        setTransactions(nextTx);
+    // One HTTP round-trip (SQL + FX once) instead of summary+transactions waterfall.
+    apiClient
+      .getFinanceOverview(period)
+      .then((overview) => {
+        setSummary(overview.summary);
+        const seen = new Set<string>();
+        setTransactions(
+          overview.transactions.filter((tx) => {
+            if (!tx.id) return true;
+            if (seen.has(tx.id)) return false;
+            seen.add(tx.id);
+            return true;
+          })
+        );
       })
       .catch((error: unknown) => setErrorUi(mapApiErrorToUi(error)))
       .finally(() => setLoading(false));
@@ -44,13 +117,27 @@ export function FinancePage() {
 
   useEffect(load, [period]);
 
+  const base = summary?.baseCurrency || summary?.currency || "VND";
+  const canShowCombined =
+    summary &&
+    !(summary.fxStatus === "unavailable" && summary.balanceBase == null);
+
+  const ratesHint = useMemo(() => {
+    if (!summary?.ratesUpdatedAt) return null;
+    try {
+      return `Курс обновлён: ${new Date(summary.ratesUpdatedAt).toLocaleString("ru-RU")}`;
+    } catch {
+      return null;
+    }
+  }, [summary?.ratesUpdatedAt]);
+
   return (
     <div>
       <Header
         title="Финансы"
         subtitle={isMockMode() ? "Только просмотр · демо" : "Ваши финансы"}
       />
-      <div className="space-y-4 px-4 pt-4">
+      <div className="space-y-4 px-4 pt-4 pb-[calc(5rem+env(safe-area-inset-bottom))]">
         <DemoNotice />
 
         <div className="flex gap-2" role="tablist" aria-label="Период">
@@ -77,96 +164,76 @@ export function FinancePage() {
         {errorUi ? <ErrorState errorUi={errorUi} onRetry={load} /> : null}
 
         {summary && !loading && !errorUi ? (
-          <div className="grid grid-cols-1 gap-3">
+          <div className="grid gap-3">
             <MetricCard
-              label={`Баланс в ${summary.baseCurrency || summary.currency}`}
+              label={`Общий баланс в ${base}`}
               value={
-                summary.fxStatus === "unavailable" && summary.balanceBase == null
-                  ? "Курсы недоступны"
-                  : `${(summary.balanceBase ?? summary.balance).toLocaleString("ru-RU")} ${summary.baseCurrency || summary.currency}`
+                canShowCombined
+                  ? money(summary.balanceBase ?? summary.balance, base)
+                  : "Сумма будет доступна после обновления курсов"
               }
-              hint={
-                summary.fxStatus === "partial"
-                  ? "Частичная конвертация"
-                  : summary.fxStatus === "unavailable"
-                    ? "Показаны исходные валюты ниже"
-                    : summary.demo
-                      ? "Демо"
-                      : undefined
-              }
+              hint={ratesHint || undefined}
             />
             <div className="grid grid-cols-2 gap-3">
               <MetricCard
-                label={`Общий доход`}
+                label={`Общий доход в ${base}`}
                 value={
-                  summary.incomeBase == null && summary.fxStatus === "unavailable"
-                    ? "—"
-                    : `${(summary.incomeBase ?? summary.incomeMonth).toLocaleString("ru-RU")} ${summary.baseCurrency || summary.currency}`
+                  canShowCombined
+                    ? money(summary.incomeBase ?? summary.incomeMonth, base)
+                    : "—"
                 }
               />
               <MetricCard
-                label={`Общий расход`}
+                label={`Общий расход в ${base}`}
                 value={
-                  summary.expenseBase == null && summary.fxStatus === "unavailable"
-                    ? "—"
-                    : `${(summary.expenseBase ?? summary.expensesMonth).toLocaleString("ru-RU")} ${summary.baseCurrency || summary.currency}`
+                  canShowCombined
+                    ? money(summary.expenseBase ?? summary.expensesMonth, base)
+                    : "—"
                 }
               />
             </div>
-            {summary.originalCurrencyTotals &&
-            summary.originalCurrencyTotals.length > 0 ? (
-              <SectionCard title="В том числе">
-                <ul className="space-y-1 text-sm text-tg-hint">
-                  {summary.originalCurrencyTotals.map((row) => (
-                    <li key={row.currency}>
-                      {row.income
-                        ? `Доход ${row.income.toLocaleString("ru-RU")} ${row.currency}`
-                        : null}
-                      {row.income && row.expense ? " · " : null}
-                      {row.expense
-                        ? `Расход ${row.expense.toLocaleString("ru-RU")} ${row.currency}`
-                        : null}
-                    </li>
-                  ))}
-                </ul>
-                {summary.ratesUpdatedAt ? (
-                  <p className="mt-2 text-xs text-tg-hint">
-                    Курс обновлён:{" "}
-                    {new Date(summary.ratesUpdatedAt).toLocaleString("ru-RU")}
-                  </p>
-                ) : null}
-                {summary.fxStatus && summary.fxStatus !== "ok" ? (
-                  <p className="mt-1 text-xs text-tg-hint">
-                    FX: {summary.fxStatus}
-                  </p>
-                ) : null}
-              </SectionCard>
+            {summary.originalCurrencyTotals?.length ? (
+              <CurrencyBreakdown totals={summary.originalCurrencyTotals} />
             ) : null}
           </div>
         ) : null}
 
         <SectionCard title="Последние операции">
-          <ul className="space-y-3">
-            {transactions.map((tx) => (
-              <li key={tx.id} className="flex items-start justify-between gap-3 text-sm">
-                <div className="min-w-0">
-                  <p className="font-medium">{tx.description}</p>
-                  <p className="text-xs text-tg-hint">
-                    {tx.category} · {tx.date}
-                  </p>
-                </div>
-                <span
-                  className={[
-                    "shrink-0 font-medium",
-                    tx.type === "income" ? "text-emerald-600" : "text-tg-text",
-                  ].join(" ")}
+          {loading ? null : transactions.length === 0 ? (
+            <p className="text-sm text-tg-hint">Нет операций</p>
+          ) : (
+            <ul className="space-y-3">
+              {transactions.map((tx) => (
+                <li
+                  key={tx.id}
+                  className="flex items-start justify-between gap-3 text-sm"
                 >
-                  {tx.type === "income" ? "+" : "−"}
-                  {tx.amount.toLocaleString("ru-RU")} {tx.currency}
-                </span>
-              </li>
-            ))}
-          </ul>
+                  <div className="min-w-0">
+                    <p className="font-medium">{tx.description || "Операция"}</p>
+                    <p className="text-xs text-tg-hint">
+                      {[
+                        tx.category && tx.category !== "other"
+                          ? tx.category
+                          : null,
+                        tx.date,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  </div>
+                  <span
+                    className={[
+                      "shrink-0 font-medium tabular-nums",
+                      tx.type === "income" ? "text-emerald-600" : "text-tg-text",
+                    ].join(" ")}
+                  >
+                    {tx.type === "income" ? "+" : "−"}
+                    {money(tx.amount, tx.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </SectionCard>
       </div>
     </div>

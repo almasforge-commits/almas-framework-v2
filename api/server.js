@@ -14,6 +14,7 @@ import { listIdeasForActor, searchIdeas, getIdeaById } from "../services/ideas/i
 import { defaultCaptureSessionStore } from "../services/capture/captureSessionStore.js";
 import { listMemoriesForActor } from "../services/storage/listMemoriesForActor.js";
 import { listTasksForActor } from "../services/storage/listTasksForActor.js";
+import { updateTaskStatus } from "../services/storage/taskStatusService.js";
 import {
   botTokenFingerprint,
   normalizeBotToken,
@@ -24,6 +25,7 @@ import {
   logSupabaseStartupDiagnostics,
   supabaseStatus,
 } from "../providers/storage/supabase.js";
+import { warmFxCache } from "../services/fx/fxProvider.js";
 
 /**
  * Resolve listen host/port for local vs hosted runtimes.
@@ -70,7 +72,8 @@ export function buildDefaultApp(env = process.env) {
       return loadActorBaseCurrencyPreference(actor);
     },
     fxProviderOptions: {
-      provider: process.env.FX_PROVIDER || "none",
+      // open-er-api supports KZT/VND; frankfurter alone does not.
+      provider: process.env.FX_PROVIDER || "open-er-api",
     },
   });
 
@@ -92,9 +95,11 @@ export function buildDefaultApp(env = process.env) {
       if (!userId) return [];
       return listTasksForActor(userId, {
         limit: opts.limit || 40,
-        status: "active",
+        // Include active for dashboard; Tasks page may request all later.
+        status: opts.status || "active",
       });
     },
+    updateTaskStatusFn: updateTaskStatus,
   });
 
   // Knowledge table has no owner column — fail closed (do not leak global rows).
@@ -127,6 +132,7 @@ export function buildDefaultApp(env = process.env) {
     inboxReader,
     tasksReader,
     knowledgeReader,
+    log: (line) => console.error(String(line)),
   });
 
   const captureReader = createCaptureReader({
@@ -169,6 +175,8 @@ export function startServer(env = process.env) {
         `[supabase] readiness=degraded reason=${supabaseStatus.reasonCode || "unknown"}`
       );
     }
+    // Prefetch USD→KZT / VND→KZT so first Dashboard is not blocked on FX HTTP.
+    void warmFxCache();
   });
 
   const shutdown = (signal) => {

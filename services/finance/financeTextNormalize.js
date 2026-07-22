@@ -90,7 +90,7 @@ export function detectExplicitCurrency(text) {
   const t = String(text || "");
   if (/донг|донга|донгов|vnd|₫/i.test(t)) return "VND";
   if (/тенге|kzt|₸/i.test(t)) return "KZT";
-  if (/usd|доллар|\$/i.test(t)) return "USD";
+  if (/usd|доллар|dollar|\$/i.test(t)) return "USD";
   if (/eur|евро|€/i.test(t)) return "EUR";
   if (/rub|руб|₽/i.test(t)) return "RUB";
   return null;

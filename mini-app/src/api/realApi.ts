@@ -3,6 +3,7 @@ import type {
   CaptureAction,
   CaptureConfirmResult,
   CaptureSessionDetail,
+  FinanceOverview,
   FinancePeriod,
   FinanceSettings,
   FinanceSummary,
@@ -66,6 +67,20 @@ export function createRealApi(deps: Partial<LiveHttpDeps> = {}): AlmasApiClient 
       return assertArray<FinanceTransaction>(data, "transactions");
     },
 
+    async getFinanceOverview(period: FinancePeriod): Promise<FinanceOverview> {
+      const data = await liveGetJson<{
+        summary: FinanceSummary;
+        transactions: FinanceTransaction[];
+      }>(`/api/finance/overview?period=${encodeURIComponent(period)}`, httpDeps);
+      return {
+        summary: data.summary,
+        transactions: assertArray<FinanceTransaction>(
+          data.transactions,
+          "transactions"
+        ),
+      };
+    },
+
     async getFinanceSettings(): Promise<FinanceSettings> {
       return liveGetJson<FinanceSettings>("/api/finance/settings", httpDeps);
     },
@@ -75,8 +90,16 @@ export function createRealApi(deps: Partial<LiveHttpDeps> = {}): AlmasApiClient 
       return assertArray<Task>(data, "tasks");
     },
 
-    async patchTask(): Promise<Task | null> {
-      return null;
+    async patchTask(
+      id: string,
+      patch: { completed: boolean }
+    ): Promise<Task | null> {
+      return liveSendJson<Task>(
+        `/api/tasks/${encodeURIComponent(id)}`,
+        "PATCH",
+        patch,
+        httpDeps
+      );
     },
 
     async getKnowledge(): Promise<KnowledgeItem[]> {

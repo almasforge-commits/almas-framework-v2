@@ -50,6 +50,9 @@ export function asyncHandler(fn) {
 }
 
 export function sendData(res, data, meta = null) {
+  // Prevent browser/CDN caching of actor-scoped reads (stale Dashboard after Complete).
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
   const body = { data };
   if (meta) body.meta = meta;
   return res.json(body);

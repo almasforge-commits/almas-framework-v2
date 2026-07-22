@@ -369,6 +369,14 @@ export const mockApi = {
     return TRANSACTIONS.map((tx) => ({ ...tx }));
   },
 
+  async getFinanceOverview(period: FinancePeriod) {
+    const [summary, transactions] = await Promise.all([
+      this.getFinanceSummary(period),
+      this.getFinanceTransactions(period),
+    ]);
+    return { summary, transactions };
+  },
+
   async getTasks(): Promise<Task[]> {
     await delay(120);
     return tasksState.map((task) => ({ ...task }));

@@ -429,7 +429,10 @@ export async function routeText(chatId, text, from, options = {}) {
 
       if (finance.type === "expense") {
 
-        const category = detectCategory(finance.description);
+        const category =
+          detectCategory(finance.description, "expense") ||
+          finance.category ||
+          "other";
 
         await addExpense({
           amount: finance.amount,
@@ -445,7 +448,10 @@ export async function routeText(chatId, text, from, options = {}) {
         await addIncome({
           amount: finance.amount,
           currency: finance.currency,
-          category: "Доход",
+          category:
+            detectCategory(finance.description, "income") ||
+            finance.category ||
+            "Доход",
           description: finance.description,
           user_id: String(from.id),
           batch_id: batchId,
@@ -466,7 +472,10 @@ export async function routeText(chatId, text, from, options = {}) {
   }
   if (finance) {
     if (finance.type === "expense") {
-      const category = detectCategory(finance.description);
+      const category =
+        detectCategory(finance.description, "expense") ||
+        finance.category ||
+        "other";
 
       await addExpense({
         amount: finance.amount,

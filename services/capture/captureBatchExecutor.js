@@ -5,6 +5,7 @@
 
 import { randomUUID } from "node:crypto";
 import { addExpense, addIncome } from "../finance/financeService.js";
+import { resolveFinanceCategory } from "../finance/categorizer.js";
 import { captureIdea } from "../ideas/ideaCapture.js";
 import { saveMemory } from "../storage/memoryService.js";
 import { classifyMemory } from "../storage/memoryClassifier.js";
@@ -59,7 +60,11 @@ export async function executeCaptureBatch(session, context = {}, deps = {}) {
         }
         const saved = await addExpenseFn({
           amount,
-          category: action.payload?.category || "other",
+          category: resolveFinanceCategory({
+            category: action.payload?.category,
+            description: action.payload?.description || action.content || "",
+            type: "expense",
+          }),
           description: action.payload?.description || action.content || "",
           currency: action.payload?.currency || "VND",
           user_id: userId,
@@ -85,7 +90,11 @@ export async function executeCaptureBatch(session, context = {}, deps = {}) {
         }
         const saved = await addIncomeFn({
           amount,
-          category: action.payload?.category || "other",
+          category: resolveFinanceCategory({
+            category: action.payload?.category,
+            description: action.payload?.description || action.content || "",
+            type: "income",
+          }),
           description: action.payload?.description || action.content || "",
           currency: action.payload?.currency || "VND",
           user_id: userId,

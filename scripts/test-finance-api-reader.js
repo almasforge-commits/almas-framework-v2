@@ -142,7 +142,6 @@ async function run() {
       originalCurrencyTotals: [],
       fxStatus: "ok",
       ratesUpdatedAt: null,
-      ratesUsed: [],
     });
     const tx = await reader.getTransactions(
       { userId: "7", telegramUserId: 7 },

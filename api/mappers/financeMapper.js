@@ -22,7 +22,6 @@ export function mapFinanceSummary({
   originalCurrencyTotals,
   fxStatus,
   ratesUpdatedAt,
-  ratesUsed,
 }) {
   const primary = currency || pickPrimaryCurrency(balances);
   const bucket = balances?.[primary] || { balance: 0, income: 0, expense: 0 };
@@ -75,7 +74,6 @@ export function mapFinanceSummary({
     originalCurrencyTotals: originals,
     fxStatus: fxStatus || "ok",
     ratesUpdatedAt: ratesUpdatedAt || null,
-    ratesUsed: Array.isArray(ratesUsed) ? ratesUsed : [],
   };
 }
 

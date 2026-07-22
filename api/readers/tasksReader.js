@@ -3,14 +3,9 @@ import { mapTask } from "../mappers/taskMapper.js";
 /**
  * Tasks fail closed: return only rows whose metadata.userId (or equivalent)
  * equals the validated Telegram user ID at query level.
- *
- * If ownership cannot be enforced via deps.listTasksForUserFn, return [].
  */
 export function createTasksReader(deps = {}) {
   return {
-    /**
-     * @returns {Promise<{ items: object[], meta: object, reason?: string }>}
-     */
     async list(actor, { limit = 20, offset = 0 } = {}) {
       if (typeof deps.listTasksForUserFn !== "function") {
         return {
@@ -20,7 +15,10 @@ export function createTasksReader(deps = {}) {
         };
       }
 
-      const rows = await deps.listTasksForUserFn(actor, { limit: limit + 1, offset });
+      const rows = await deps.listTasksForUserFn(actor, {
+        limit: limit + 1,
+        offset,
+      });
       if (!Array.isArray(rows)) {
         return {
           items: [],
@@ -37,6 +35,23 @@ export function createTasksReader(deps = {}) {
         ),
         meta: { limit, offset, hasMore },
       };
+    },
+
+    /**
+     * Actor-scoped complete/reopen.
+     * @returns {Promise<object|null>}
+     */
+    async patch(actor, taskId, { completed } = {}) {
+      if (typeof deps.updateTaskStatusFn !== "function") return null;
+      const userId =
+        actor?.userId ||
+        (actor?.telegramUserId != null ? String(actor.telegramUserId) : null);
+      if (!userId) return null;
+
+      const status = completed ? "done" : "active";
+      const row = await deps.updateTaskStatusFn(taskId, status, { userId });
+      if (!row) return null;
+      return mapTask(row);
     },
   };
 }

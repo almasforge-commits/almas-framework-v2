@@ -34,16 +34,21 @@ describe("dashboard UI helpers", () => {
   it("renders stats from summary only", () => {
     render(
       <MemoryRouter>
-        <StatsGrid summary={summary} />
+        <StatsGrid
+          summary={{
+            ...summary,
+            incomeToday: 500000,
+            balanceToday: 314000,
+          }}
+        />
       </MemoryRouter>
     );
     expect(screen.getByTestId("dashboard-stats")).toBeInTheDocument();
-    expect(screen.getByText("Расходы в VND")).toBeInTheDocument();
+    expect(screen.getByText("Баланс в VND")).toBeInTheDocument();
+    expect(screen.getByText("Доход в VND")).toBeInTheDocument();
+    expect(screen.getByText("Расход в VND")).toBeInTheDocument();
     expect(screen.getByText("Активные задачи")).toBeInTheDocument();
-    expect(screen.getByText("Знания")).toBeInTheDocument();
-    expect(screen.getByText("Идеи")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
   });
 
   it("renders whats-new from backend summary fields", () => {

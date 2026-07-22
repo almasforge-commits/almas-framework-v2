@@ -3,6 +3,8 @@
  * Prefer persisted finance/task domains over free-text idea heuristics.
  */
 
+import { looksLikeFinanceAttempt } from "../../services/finance/financeParser.js";
+
 /**
  * @param {string[]} kinds
  * @param {{ executionSummary?: unknown, originalText?: string }} [hints]
@@ -17,14 +19,25 @@ export function resolveActivityDomain(kinds = [], hints = {}) {
       : summary && typeof summary === "object"
         ? JSON.stringify(summary)
         : "";
+  const originalText = String(hints.originalText || "");
 
   if (
     /expense_saved|income_saved|finance_expense|finance_income|"finance"/i.test(
       summaryText
     ) ||
-    list.includes("finance")
+    list.includes("finance") ||
+    looksLikeFinanceAttempt(originalText) ||
+    /запиши[\s\S]{0,40}(потрат|получил|заработ|доход|расход)/iu.test(
+      originalText
+    )
   ) {
-    if (/income_saved|finance_income/i.test(summaryText)) return "income";
+    if (
+      /income_saved|finance_income|получил|заработ|доход/i.test(
+        `${summaryText} ${originalText}`
+      )
+    ) {
+      return "income";
+    }
     return "expense";
   }
   if (list.includes("task")) return "task";

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/apiClient";
 import type { Task } from "../api/apiTypes";
 import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
+import { requestDashboardRefresh } from "../app/dashboardRefresh";
 import { DemoNotice } from "../components/DemoNotice";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
@@ -37,6 +38,7 @@ export function TasksPage() {
 
   const toggle = async (task: Task) => {
     const nextCompleted = !task.completed;
+    // Optimistic UI: leave "Сегодня" immediately on Complete.
     setTasks((prev) =>
       prev.map((entry) =>
         entry.id === task.id
@@ -49,7 +51,16 @@ export function TasksPage() {
           : entry
       )
     );
-    await apiClient.patchTask(task.id, { completed: nextCompleted });
+    try {
+      await apiClient.patchTask(task.id, { completed: nextCompleted });
+      requestDashboardRefresh();
+    } catch (error: unknown) {
+      // Roll back optimistic update on failure.
+      setTasks((prev) =>
+        prev.map((entry) => (entry.id === task.id ? task : entry))
+      );
+      setErrorUi(mapApiErrorToUi(error));
+    }
   };
 
   const renderGroup = (title: string, list: Task[]) => (
@@ -86,7 +97,7 @@ export function TasksPage() {
 
   return (
     <div>
-      <Header title="Задачи" subtitle="Локальные переключатели · демо" />
+      <Header title="Задачи" subtitle="Активные и выполненные" />
       <div className="space-y-4 px-4 pt-4">
         <DemoNotice />
         {loading ? <LoadingState /> : null}

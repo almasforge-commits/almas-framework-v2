@@ -184,9 +184,8 @@ function detectFinanceType(lower) {
     }
   }
 
-  const category = detectCategory(normalized);
-  if (category) return "expense";
-
+  // Do not infer type from category keywords alone ("lunch", "кофе") —
+  // that incorrectly classifies English notes as deterministic finance.
   return null;
 }
 
@@ -245,6 +244,7 @@ export function parseFinanceMessage(text = "") {
     amount,
     currency,
     description,
+    category: detectCategory(description, type) || null,
   };
 }
 

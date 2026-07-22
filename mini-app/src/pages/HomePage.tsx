@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { apiClient } from "../api/apiClient";
 import type { HomePayload } from "../api/apiTypes";
 import { mapApiErrorToUi, type ApiErrorUi } from "../api/apiErrors";
@@ -16,11 +17,17 @@ import {
 } from "../components/dashboard/greeting";
 import { usePullToRefresh } from "../components/dashboard/usePullToRefresh";
 import { useTelegram } from "../telegram/TelegramProvider";
+import {
+  consumeDashboardStaleFlag,
+  onDashboardRefresh,
+} from "../app/dashboardRefresh";
 
 function isDashboardEmpty(data: HomePayload): boolean {
   const { summary, todayActivity, recentActions } = data;
   return (
-    summary.expensesToday === 0 &&
+    Number(summary.expensesToday || 0) === 0 &&
+    Number(summary.incomeToday || 0) === 0 &&
+    Number(summary.balanceToday || 0) === 0 &&
     summary.activeTasks === 0 &&
     summary.newKnowledge === 0 &&
     summary.inboxToday === 0 &&
@@ -31,9 +38,11 @@ function isDashboardEmpty(data: HomePayload): boolean {
 
 export function HomePage() {
   const { user, browserPreview } = useTelegram();
+  const location = useLocation();
   const [data, setData] = useState<HomePayload | null>(null);
   const [errorUi, setErrorUi] = useState<ApiErrorUi | null>(null);
   const [loading, setLoading] = useState(true);
+  const skipNextLocationRefresh = useRef(true);
 
   const load = useCallback(
     async (opts: { silent?: boolean } = {}) => {
@@ -57,6 +66,40 @@ export function HomePage() {
     void load();
   }, [load]);
 
+  // Immediate refresh after Tasks Complete (even if Home was unmounted).
+  useEffect(() => {
+    if (consumeDashboardStaleFlag()) {
+      void load({ silent: true });
+    }
+    return onDashboardRefresh(() => {
+      void load({ silent: true });
+    });
+  }, [load]);
+
+  // Refresh when navigating back to Dashboard after Tasks/Finance.
+  useEffect(() => {
+    if (location.pathname !== "/") return;
+    if (skipNextLocationRefresh.current) {
+      skipNextLocationRefresh.current = false;
+      return;
+    }
+    void load({ silent: true });
+  }, [location.key, location.pathname, load]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      if (document.visibilityState === "visible") {
+        void load({ silent: true });
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [load]);
+
   const refresh = useCallback(() => load({ silent: true }), [load]);
   const { pullDistance, refreshing, handlers } = usePullToRefresh(refresh);
 
@@ -68,7 +111,7 @@ export function HomePage() {
 
   const activityItems = useMemo(() => {
     if (!data) return [];
-    const merged = [...data.recentActions, ...data.todayActivity];
+    const merged = [...data.todayActivity, ...data.recentActions];
     const seen = new Set<string>();
     const unique = [];
     for (const item of merged) {
