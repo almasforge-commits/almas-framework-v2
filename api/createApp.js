@@ -1,5 +1,6 @@
 import express from "express";
 import { createAuthTelegramMiddleware } from "./middleware/authTelegram.js";
+import { normalizeBotToken } from "./auth/validateInitData.js";
 import { HttpError, sendError } from "./httpErrors.js";
 import { parseCorsAllowlist, resolveCorsOrigin } from "./cors.js";
 import { createDashboardRouter } from "./routes/dashboard.js";
@@ -23,7 +24,8 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
  * — not an official Telegram HTTP requirement.
  */
 export function createApp(deps) {
-  if (!deps?.botToken) {
+  const botToken = normalizeBotToken(deps?.botToken);
+  if (!botToken) {
     throw new Error("createApp requires deps.botToken");
   }
 
@@ -34,9 +36,9 @@ export function createApp(deps) {
   const log =
     typeof deps.log === "function"
       ? deps.log
-      : (code) => {
-          // Concise reason codes only — never initData, hash, token, or user JSON.
-          console.error(`[almas-api] ${code}`);
+      : (line) => {
+          // Safe lines only — never initData, hash, token, Authorization, or user JSON.
+          console.error(String(line));
         };
 
   const allowlist = Array.isArray(deps.corsAllowlist)
@@ -82,7 +84,7 @@ export function createApp(deps) {
   });
 
   const auth = createAuthTelegramMiddleware({
-    botToken: deps.botToken,
+    botToken,
     nowMs: deps.nowMs,
     maxAgeSeconds: deps.maxAgeSeconds,
     clockSkewSeconds: deps.clockSkewSeconds,

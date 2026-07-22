@@ -21,10 +21,14 @@ export function unauthorizedError(logCode) {
 
 export function sendError(res, error, logger) {
   if (error instanceof HttpError) {
+    // Auth middleware already emits detailed [auth] diagnostics.
+    // Keep a single compact rejection marker without secrets.
     if (error.status === 401 && typeof logger === "function") {
-      logger(`auth_rejected:${error.logCode}`);
+      if (!String(error.logCode || "").startsWith("[auth]")) {
+        logger(`[auth] rejected=${error.logCode}`);
+      }
     } else if (error.status >= 500 && typeof logger === "function") {
-      logger(`http_error:${error.logCode}`);
+      logger(`[almas-api] http_error:${error.logCode}`);
     }
     return res.status(error.status).json({
       error: { code: error.code, message: error.message },

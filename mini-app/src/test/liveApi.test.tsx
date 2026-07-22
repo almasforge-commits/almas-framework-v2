@@ -95,8 +95,9 @@ describe("env selection (VITE_ALMAS_*)", () => {
 });
 
 describe("live API client", () => {
-  it("Authorization header contains raw initData", async () => {
-    const initData = "auth_date=1&user=%7B%22id%22%3A1%7D&hash=abc";
+  it("Authorization header contains raw initData exactly (no mutation)", async () => {
+    const initData =
+      "query_id=AAE&user=%7B%22id%22%3A1%2C%22first_name%22%3A%22A%2BB%22%7D&auth_date=1710000000&hash=abcdef0123456789";
     let seenAuth: string | null = null;
     const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
       seenAuth = String((init?.headers as Record<string, string>).Authorization);
@@ -115,7 +116,12 @@ describe("live API client", () => {
 
     expect(seenAuth).toBe(buildAuthHeader(initData));
     expect(seenAuth).toBe(`tma ${initData}`);
-    expect(seenAuth).not.toContain("initDataUnsafe");
+    const header = String(seenAuth);
+    expect(header.slice(4)).toBe(initData);
+    expect(header).toContain("%7B");
+    expect(header).toContain("A%2BB");
+    expect(header).not.toContain("initDataUnsafe");
+    expect(header.startsWith("tma tma ")).toBe(false);
   });
 
   it("initDataUnsafe is never used for auth", async () => {

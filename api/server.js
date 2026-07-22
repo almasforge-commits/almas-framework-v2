@@ -20,6 +20,10 @@ import { listIdeasForActor, searchIdeas, getIdeaById } from "../services/ideas/i
 import { defaultCaptureSessionStore } from "../services/capture/captureSessionStore.js";
 import { listMemoriesForActor } from "../services/storage/listMemoriesForActor.js";
 import { listTasksForActor } from "../services/storage/listTasksForActor.js";
+import {
+  botTokenFingerprint,
+  normalizeBotToken,
+} from "./auth/validateInitData.js";
 
 /**
  * Resolve listen host/port for local vs hosted runtimes.
@@ -48,7 +52,7 @@ export function resolveListenConfig(env = process.env) {
  * Application-level actor filters do not replace database RLS.
  */
 export function buildDefaultApp(env = process.env) {
-  const botToken = env.BOT_TOKEN;
+  const botToken = normalizeBotToken(env.BOT_TOKEN);
   if (!botToken) {
     throw new Error("BOT_TOKEN is required to start the ALMAS API");
   }
@@ -137,9 +141,12 @@ export function buildDefaultApp(env = process.env) {
 export function startServer(env = process.env) {
   const { host, port } = resolveListenConfig(env);
   const app = buildDefaultApp(env);
+  const fingerprint = botTokenFingerprint(env.BOT_TOKEN);
 
   const server = app.listen(port, host, () => {
     console.log(`ALMAS API listening on http://${host}:${port}`);
+    // Non-reversible ops check only — never log BOT_TOKEN itself.
+    console.log(`[auth] botTokenFingerprint=${fingerprint}`);
   });
 
   const shutdown = (signal) => {

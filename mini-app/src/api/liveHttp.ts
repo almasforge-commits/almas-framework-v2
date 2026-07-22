@@ -2,7 +2,10 @@ import { ApiError } from "./apiErrors";
 import { recordApiDiag } from "./apiDiagnostics";
 import { joinApiUrl } from "../config/env";
 import { getRawInitData } from "../telegram/initData";
-import { initTelegramWebApp } from "../telegram/telegramWebApp";
+import {
+  getTelegramWebApp,
+  initTelegramWebApp,
+} from "../telegram/telegramWebApp";
 
 export type FetchLike = typeof fetch;
 
@@ -16,8 +19,35 @@ export interface LiveHttpDeps {
   initDataAttempts?: number;
 }
 
-function buildAuthHeader(initData: string): string {
+/**
+ * Exact ALMAS auth header. Must not mutate initData (no decode/JSON/trim of body).
+ */
+export function buildAuthHeader(initData: string): string {
+  // Prefix only — preserve every character of raw Telegram.WebApp.initData.
   return `tma ${initData}`;
+}
+
+/** Safe client auth diagnostics — never logs raw initData or Authorization. */
+export function logMiniAppAuthDiag(opts: {
+  telegramSdkPresent: boolean;
+  initDataPresent: boolean;
+  initDataLength: number;
+  authHeaderBuilt: boolean;
+}): void {
+  // eslint-disable-next-line no-console
+  console.info(
+    `[mini-app-auth] telegramSdkPresent=${opts.telegramSdkPresent ? "true" : "false"}`
+  );
+  // eslint-disable-next-line no-console
+  console.info(
+    `[mini-app-auth] initDataPresent=${opts.initDataPresent ? "true" : "false"}`
+  );
+  // eslint-disable-next-line no-console
+  console.info(`[mini-app-auth] initDataLength=${opts.initDataLength}`);
+  // eslint-disable-next-line no-console
+  console.info(
+    `[mini-app-auth] authHeaderBuilt=${opts.authHeaderBuilt ? "true" : "false"}`
+  );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -87,6 +117,12 @@ export async function liveGetJson<T>(
   );
 
   if (!initData) {
+    logMiniAppAuthDiag({
+      telegramSdkPresent: Boolean(getTelegramWebApp()),
+      initDataPresent: false,
+      initDataLength: 0,
+      authHeaderBuilt: false,
+    });
     recordApiDiag({
       apiHost: (() => {
         try {
@@ -107,6 +143,17 @@ export async function liveGetJson<T>(
     });
   }
 
+  const authorization = buildAuthHeader(initData);
+  logMiniAppAuthDiag({
+    telegramSdkPresent: Boolean(getTelegramWebApp()),
+    initDataPresent: true,
+    initDataLength: initData.length,
+    authHeaderBuilt:
+      authorization.startsWith("tma ") &&
+      authorization.slice(4) === initData &&
+      !authorization.slice(4).startsWith("tma "),
+  });
+
   const fetchFn = deps.fetchFn ?? fetch;
   recordApiDiag({
     apiHost: new URL(url).host,
@@ -123,7 +170,7 @@ export async function liveGetJson<T>(
       method: "GET",
       headers: {
         Accept: "application/json",
-        Authorization: buildAuthHeader(initData),
+        Authorization: authorization,
       },
     });
   } catch {
@@ -316,5 +363,3 @@ export async function liveSendJson<T>(
 
   return (payload as { data: T }).data;
 }
-
-export { buildAuthHeader };

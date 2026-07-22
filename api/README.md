@@ -31,7 +31,25 @@ Validation uses the official bot-token HMAC (not third-party Ed25519). All auth 
 { "error": { "code": "unauthorized", "message": "Unauthorized" } }
 ```
 
-Server logs may include a concise reason code only — never raw initData, hash, bot token, or user JSON.
+Server logs use safe `[auth]` diagnostics (booleans, lengths, reason codes only) — never raw initData, hash, bot token, Authorization, or user JSON.
+
+Startup also logs a non-reversible token check:
+
+```
+[auth] botTokenFingerprint=xxxxxxxx
+```
+
+Compare with local:
+
+```bash
+node scripts/print-bot-token-fingerprint.js
+```
+
+Local initData debugging (sensitive — do not paste initData into chat/git):
+
+```bash
+TELEGRAM_INIT_DATA='...' node scripts/debug-telegram-init-data.js
+```
 
 ## Response envelopes
 
