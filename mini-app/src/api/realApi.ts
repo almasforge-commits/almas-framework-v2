@@ -34,6 +34,7 @@ export function createRealApi(deps: Partial<LiveHttpDeps> = {}): AlmasApiClient 
     baseUrl: deps.baseUrl ?? getApiBaseUrl(),
     fetchFn: deps.fetchFn,
     getInitData: deps.getInitData,
+    initDataRetryMs: deps.initDataRetryMs,
   };
 
   return {

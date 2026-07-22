@@ -1,5 +1,8 @@
 import { ApiError } from "./apiErrors";
+import { recordApiDiag } from "./apiDiagnostics";
+import { joinApiUrl } from "../config/env";
 import { getRawInitData } from "../telegram/initData";
+import { initTelegramWebApp } from "../telegram/telegramWebApp";
 
 export type FetchLike = typeof fetch;
 
@@ -7,10 +10,38 @@ export interface LiveHttpDeps {
   baseUrl: string;
   fetchFn?: FetchLike;
   getInitData?: () => string | null;
+  /** Test-only: skip initData retry delay. */
+  initDataRetryMs?: number;
 }
 
 function buildAuthHeader(initData: string): string {
   return `tma ${initData}`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Read initData after ensuring WebApp.ready(). Retry once if temporarily empty
+ * (Telegram WebView can expose the bridge slightly after first paint).
+ */
+export async function resolveInitDataForRequest(
+  getInitData: () => string | null,
+  retryMs = 50
+): Promise<string | null> {
+  initTelegramWebApp();
+  const first = getInitData();
+  if (first) return first;
+  if (retryMs <= 0) return null;
+  await sleep(retryMs);
+  initTelegramWebApp();
+  return getInitData();
+}
+
+function pathOnly(path: string): string {
+  const q = path.indexOf("?");
+  return q >= 0 ? path.slice(0, q) : path;
 }
 
 /**
@@ -21,16 +52,43 @@ export async function liveGetJson<T>(
   path: string,
   deps: LiveHttpDeps
 ): Promise<T> {
-  const baseUrl = deps.baseUrl.replace(/\/+$/, "");
-  if (!baseUrl) {
+  const endpoint = pathOnly(path);
+  let url: string;
+  try {
+    url = joinApiUrl(deps.baseUrl, path);
+  } catch {
+    recordApiDiag({
+      apiHost: null,
+      endpoint,
+      fetchAttempted: false,
+      initDataPresent: false,
+      responseStatus: null,
+      errorCategory: "unavailable",
+    });
     throw new ApiError("unavailable", "API URL is not configured", {
       retryable: false,
     });
   }
 
   const getInitData = deps.getInitData ?? getRawInitData;
-  const initData = getInitData();
+  const retryMs = deps.initDataRetryMs ?? 50;
+  const initData = await resolveInitDataForRequest(getInitData, retryMs);
+
   if (!initData) {
+    recordApiDiag({
+      apiHost: (() => {
+        try {
+          return new URL(url).host;
+        } catch {
+          return null;
+        }
+      })(),
+      endpoint,
+      fetchAttempted: false,
+      initDataPresent: false,
+      responseStatus: null,
+      errorCategory: "auth_required",
+    });
     throw new ApiError("auth_required", "Telegram initData is required", {
       status: 401,
       retryable: false,
@@ -38,7 +96,14 @@ export async function liveGetJson<T>(
   }
 
   const fetchFn = deps.fetchFn ?? fetch;
-  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  recordApiDiag({
+    apiHost: new URL(url).host,
+    endpoint,
+    fetchAttempted: true,
+    initDataPresent: true,
+    responseStatus: null,
+    errorCategory: null,
+  });
 
   let response: Response;
   try {
@@ -50,10 +115,24 @@ export async function liveGetJson<T>(
       },
     });
   } catch {
+    recordApiDiag({
+      endpoint,
+      fetchAttempted: true,
+      initDataPresent: true,
+      errorCategory: "network",
+    });
     throw new ApiError("network", "Network request failed", {
       retryable: true,
     });
   }
+
+  recordApiDiag({
+    endpoint,
+    fetchAttempted: true,
+    initDataPresent: true,
+    responseStatus: response.status,
+    errorCategory: response.ok ? null : String(response.status),
+  });
 
   if (response.status === 401) {
     throw new ApiError("unauthorized", "Unauthorized", {
@@ -79,6 +158,7 @@ export async function liveGetJson<T>(
   try {
     payload = await response.json();
   } catch {
+    recordApiDiag({ errorCategory: "malformed", responseStatus: response.status });
     throw new ApiError("malformed", "Invalid JSON response", {
       status: response.status,
       retryable: true,
@@ -91,6 +171,7 @@ export async function liveGetJson<T>(
     !("data" in payload) ||
     (payload as { data: unknown }).data === undefined
   ) {
+    recordApiDiag({ errorCategory: "malformed", responseStatus: response.status });
     throw new ApiError("malformed", "Missing data envelope", {
       status: response.status,
       retryable: true,
@@ -109,16 +190,32 @@ export async function liveSendJson<T>(
   body: unknown,
   deps: LiveHttpDeps
 ): Promise<T> {
-  const baseUrl = deps.baseUrl.replace(/\/+$/, "");
-  if (!baseUrl) {
+  const endpoint = pathOnly(path);
+  let url: string;
+  try {
+    url = joinApiUrl(deps.baseUrl, path);
+  } catch {
+    recordApiDiag({
+      endpoint,
+      fetchAttempted: false,
+      errorCategory: "unavailable",
+    });
     throw new ApiError("unavailable", "API URL is not configured", {
       retryable: false,
     });
   }
 
   const getInitData = deps.getInitData ?? getRawInitData;
-  const initData = getInitData();
+  const retryMs = deps.initDataRetryMs ?? 50;
+  const initData = await resolveInitDataForRequest(getInitData, retryMs);
+
   if (!initData) {
+    recordApiDiag({
+      endpoint,
+      fetchAttempted: false,
+      initDataPresent: false,
+      errorCategory: "auth_required",
+    });
     throw new ApiError("auth_required", "Telegram initData is required", {
       status: 401,
       retryable: false,
@@ -126,7 +223,14 @@ export async function liveSendJson<T>(
   }
 
   const fetchFn = deps.fetchFn ?? fetch;
-  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  recordApiDiag({
+    apiHost: new URL(url).host,
+    endpoint,
+    fetchAttempted: true,
+    initDataPresent: true,
+    responseStatus: null,
+    errorCategory: null,
+  });
 
   let response: Response;
   try {
@@ -140,10 +244,22 @@ export async function liveSendJson<T>(
       body: JSON.stringify(body ?? {}),
     });
   } catch {
+    recordApiDiag({
+      endpoint,
+      fetchAttempted: true,
+      errorCategory: "network",
+    });
     throw new ApiError("network", "Network request failed", {
       retryable: true,
     });
   }
+
+  recordApiDiag({
+    endpoint,
+    fetchAttempted: true,
+    responseStatus: response.status,
+    errorCategory: response.ok ? null : String(response.status),
+  });
 
   if (response.status === 401) {
     throw new ApiError("unauthorized", "Unauthorized", {

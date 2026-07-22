@@ -2,6 +2,7 @@ import type { AlmasApiClient } from "./apiTypes";
 import { mockApi } from "./mockApi";
 import { createRealApi } from "./realApi";
 import { getApiMode, type ApiMode } from "../config/env";
+import { logApiDiag } from "./apiDiagnostics";
 
 export type { AlmasApiClient };
 
@@ -24,10 +25,20 @@ const mockClient: AlmasApiClient = {
 };
 
 export function resolveApiClient(mode: ApiMode = getApiMode()): AlmasApiClient {
+  // Explicit only: live → realApi; anything else (including unset) → mock.
+  // No silent production override — missing VITE_ALMAS_API_MODE means mock.
   return mode === "live" ? createRealApi() : mockClient;
 }
 
-export const apiClient: AlmasApiClient = resolveApiClient();
+export const apiClientMode: ApiMode = getApiMode();
+export const apiClient: AlmasApiClient = resolveApiClient(apiClientMode);
+
+/** Which implementation the singleton selected (for tests / diagnostics). */
+export function getResolvedClientKind(
+  mode: ApiMode = apiClientMode
+): "real" | "mock" {
+  return mode === "live" ? "real" : "mock";
+}
 
 export const API_ROUTES = {
   dashboard: "GET /api/dashboard",
@@ -40,3 +51,8 @@ export const API_ROUTES = {
   capture: "GET /api/capture/:sessionId",
   ideas: "GET /api/ideas",
 } as const;
+
+// Boot diagnostic once (safe in production; no secrets).
+logApiDiag({
+  apiMode: apiClientMode,
+});

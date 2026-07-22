@@ -1,15 +1,21 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
-import { getApiBaseUrl, getApiMode } from "./config/env";
+import { logApiDiag } from "./api/apiDiagnostics";
+import { getApiHost, getApiMode } from "./config/env";
+import { getRawInitData } from "./telegram/initData";
 import "./styles/globals.css";
 
-// Non-secret diagnostics only — never log initData or tokens.
-if (import.meta.env.DEV || import.meta.env.MODE === "test") {
-  console.info(
-    `[mini-app] apiMode=${getApiMode()} apiUrl=${getApiBaseUrl() ? "set" : "unset"}`
-  );
-}
+// Production-safe boot log (no initData / tokens). Visible in Telegram WebView consoles.
+logApiDiag({
+  apiMode: getApiMode(),
+  apiHost: getApiHost(),
+  initDataPresent: Boolean(getRawInitData()),
+  endpoint: null,
+  fetchAttempted: false,
+  responseStatus: null,
+  errorCategory: null,
+});
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
