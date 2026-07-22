@@ -366,7 +366,7 @@ export function createFxProviderFromEnv(overrides = {}) {
   ) {
     // Railway often still has FX_PROVIDER=none from earlier docs — that
     // caused balance=KZT-only. Force live conversion unless explicitly allowed.
-    console.error("[fx] provider=none ignored; using live open-er-api+jsdelivr");
+    console.log("[fx] provider=none ignored; using live open-er-api+jsdelivr");
     name = "open-er-api";
   }
 
@@ -400,7 +400,7 @@ export async function warmFxCache(provider = createFxProviderFromEnv()) {
   try {
     await provider.getRate("USD", "KZT");
     await provider.getRate("VND", "KZT");
-    console.error("[fx] warm_ok provider=" + (provider.name || "unknown"));
+    console.log("[fx] warm_ok provider=" + (provider.name || "unknown"));
   } catch (error) {
     console.error("[fx] warm_failed", error?.message || error);
   }

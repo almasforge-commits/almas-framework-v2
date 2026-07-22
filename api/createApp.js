@@ -50,9 +50,12 @@ export function createApp(deps) {
     if (allowed) {
       res.setHeader("Access-Control-Allow-Origin", allowed);
       res.setHeader("Vary", "Origin");
+      // Must include every non-safelisted request header the Mini App sends.
+      // Missing Cache-Control here made Telegram WebView fail preflight →
+      // fetch threw → UI mapped that to «Нет соединения».
       res.setHeader(
         "Access-Control-Allow-Headers",
-        "Authorization, Content-Type"
+        "Authorization, Content-Type, Cache-Control, Accept"
       );
       res.setHeader(
         "Access-Control-Allow-Methods",

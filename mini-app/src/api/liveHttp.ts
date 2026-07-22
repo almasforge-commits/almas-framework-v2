@@ -82,6 +82,52 @@ function pathOnly(path: string): string {
 }
 
 /**
+ * Temporary production diagnostics for «Нет соединения».
+ * Never logs Authorization / initData / tokens.
+ */
+function logLiveHttpFailure(opts: {
+  phase: string;
+  url: string;
+  method: string;
+  status?: number | null;
+  error?: unknown;
+  bodyText?: string | null;
+}): void {
+  const err = opts.error;
+  const message =
+    err instanceof Error
+      ? err.message
+      : err != null
+        ? String(err)
+        : "";
+  const stack = err instanceof Error ? err.stack || "" : "";
+  // eslint-disable-next-line no-console
+  console.error(`[mini-app-http] phase=${opts.phase}`);
+  // eslint-disable-next-line no-console
+  console.error(`[mini-app-http] method=${opts.method}`);
+  // eslint-disable-next-line no-console
+  console.error(`[mini-app-http] url=${opts.url}`);
+  // eslint-disable-next-line no-console
+  console.error(
+    `[mini-app-http] status=${opts.status == null ? "none" : String(opts.status)}`
+  );
+  if (message) {
+    // eslint-disable-next-line no-console
+    console.error(`[mini-app-http] error=${message}`);
+  }
+  if (stack) {
+    // eslint-disable-next-line no-console
+    console.error(`[mini-app-http] stack=${stack}`);
+  }
+  if (opts.bodyText != null && opts.bodyText !== "") {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[mini-app-http] body=${opts.bodyText.slice(0, 500)}`
+    );
+  }
+}
+
+/**
  * Authenticated GET against the ALMAS read-only API.
  * Sends only Authorization: tma <rawInitData>.
  */
@@ -93,7 +139,7 @@ export async function liveGetJson<T>(
   let url: string;
   try {
     url = joinApiUrl(deps.baseUrl, path);
-  } catch {
+  } catch (error) {
     recordApiDiag({
       apiHost: null,
       endpoint,
@@ -102,10 +148,19 @@ export async function liveGetJson<T>(
       responseStatus: null,
       errorCategory: "unavailable",
     });
+    logLiveHttpFailure({
+      phase: "join_url",
+      url: String(deps.baseUrl || "") + path,
+      method: "GET",
+      error,
+    });
     throw new ApiError("unavailable", "API URL is not configured", {
       retryable: false,
     });
   }
+
+  // eslint-disable-next-line no-console
+  console.info(`[mini-app-http] first_request_url=${url}`);
 
   const getInitData = deps.getInitData ?? getRawInitData;
   const retryMs = deps.initDataRetryMs ?? 100;
@@ -137,6 +192,13 @@ export async function liveGetJson<T>(
       responseStatus: null,
       errorCategory: "auth_required",
     });
+    logLiveHttpFailure({
+      phase: "missing_init_data",
+      url,
+      method: "GET",
+      status: 401,
+      error: new Error("Telegram initData is required"),
+    });
     throw new ApiError("auth_required", "Telegram initData is required", {
       status: 401,
       retryable: false,
@@ -166,21 +228,29 @@ export async function liveGetJson<T>(
 
   let response: Response;
   try {
+    // Do NOT send Cache-Control request header: it is not CORS-safelisted and
+    // was missing from Access-Control-Allow-Headers → browser preflight failed
+    // → TypeError in fetch → UI «Нет соединения». cache:'no-store' is enough.
     response = await fetchFn(url, {
       method: "GET",
       cache: "no-store",
       headers: {
         Accept: "application/json",
         Authorization: authorization,
-        "Cache-Control": "no-cache",
       },
     });
-  } catch {
+  } catch (error) {
     recordApiDiag({
       endpoint,
       fetchAttempted: true,
       initDataPresent: true,
       errorCategory: "network",
+    });
+    logLiveHttpFailure({
+      phase: "fetch_threw",
+      url,
+      method: "GET",
+      error,
     });
     throw new ApiError("network", "Network request failed", {
       retryable: true,
@@ -195,19 +265,46 @@ export async function liveGetJson<T>(
     errorCategory: response.ok ? null : String(response.status),
   });
 
+  // eslint-disable-next-line no-console
+  console.info(`[mini-app-http] status=${response.status} url=${url}`);
+
   if (response.status === 401) {
+    const bodyText = await response.clone().text().catch(() => "");
+    logLiveHttpFailure({
+      phase: "http_401",
+      url,
+      method: "GET",
+      status: 401,
+      bodyText,
+    });
     throw new ApiError("unauthorized", "Unauthorized", {
       status: 401,
       retryable: false,
     });
   }
   if (response.status === 503) {
+    const bodyText = await response.clone().text().catch(() => "");
+    logLiveHttpFailure({
+      phase: "http_503",
+      url,
+      method: "GET",
+      status: 503,
+      bodyText,
+    });
     throw new ApiError("unavailable", "Service unavailable", {
       status: 503,
       retryable: true,
     });
   }
   if (!response.ok) {
+    const bodyText = await response.clone().text().catch(() => "");
+    logLiveHttpFailure({
+      phase: "http_error",
+      url,
+      method: "GET",
+      status: response.status,
+      bodyText,
+    });
     throw new ApiError(
       response.status === 400 ? "bad_request" : "unknown",
       "Request failed",
@@ -221,8 +318,15 @@ export async function liveGetJson<T>(
   let payload: unknown;
   try {
     payload = await response.json();
-  } catch {
+  } catch (error) {
     recordApiDiag({ errorCategory: "malformed", responseStatus: response.status });
+    logLiveHttpFailure({
+      phase: "json_parse",
+      url,
+      method: "GET",
+      status: response.status,
+      error,
+    });
     throw new ApiError("malformed", "Invalid JSON response", {
       status: response.status,
       retryable: true,
@@ -236,6 +340,13 @@ export async function liveGetJson<T>(
     (payload as { data: unknown }).data === undefined
   ) {
     recordApiDiag({ errorCategory: "malformed", responseStatus: response.status });
+    logLiveHttpFailure({
+      phase: "missing_data_envelope",
+      url,
+      method: "GET",
+      status: response.status,
+      bodyText: JSON.stringify(payload).slice(0, 500),
+    });
     throw new ApiError("malformed", "Missing data envelope", {
       status: response.status,
       retryable: true,
@@ -310,15 +421,20 @@ export async function liveSendJson<T>(
         Accept: "application/json",
         "Content-Type": "application/json",
         Authorization: buildAuthHeader(initData),
-        "Cache-Control": "no-cache",
       },
       body: JSON.stringify(body ?? {}),
     });
-  } catch {
+  } catch (error) {
     recordApiDiag({
       endpoint,
       fetchAttempted: true,
       errorCategory: "network",
+    });
+    logLiveHttpFailure({
+      phase: "fetch_threw",
+      url,
+      method,
+      error,
     });
     throw new ApiError("network", "Network request failed", {
       retryable: true,
@@ -332,13 +448,32 @@ export async function liveSendJson<T>(
     errorCategory: response.ok ? null : String(response.status),
   });
 
+  // eslint-disable-next-line no-console
+  console.info(`[mini-app-http] status=${response.status} url=${url}`);
+
   if (response.status === 401) {
+    const bodyText = await response.clone().text().catch(() => "");
+    logLiveHttpFailure({
+      phase: "http_401",
+      url,
+      method,
+      status: 401,
+      bodyText,
+    });
     throw new ApiError("unauthorized", "Unauthorized", {
       status: 401,
       retryable: false,
     });
   }
   if (!response.ok) {
+    const bodyText = await response.clone().text().catch(() => "");
+    logLiveHttpFailure({
+      phase: "http_error",
+      url,
+      method,
+      status: response.status,
+      bodyText,
+    });
     throw new ApiError(
       response.status === 400 ? "bad_request" : "unknown",
       "Request failed",

@@ -144,6 +144,23 @@ await test("10–11. configured CORS origin succeeds; unrelated rejected", async
       headers: { Origin: "https://evil.example" },
     });
     assert.equal(bad.headers.get("access-control-allow-origin"), null);
+
+    // Regression: Mini App briefly sent Cache-Control request header.
+    // Preflight must allow it (or the client must not send it).
+    const preflight = await fetch(`${base}/api/dashboard`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://almas-framework-v2-five.vercel.app",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization,cache-control",
+      },
+    });
+    assert.equal(preflight.status, 204);
+    const allowHeaders = String(
+      preflight.headers.get("access-control-allow-headers") || ""
+    ).toLowerCase();
+    assert.match(allowHeaders, /authorization/);
+    assert.match(allowHeaders, /cache-control/);
   } finally {
     await close();
   }
