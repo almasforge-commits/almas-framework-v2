@@ -1,0 +1,10 @@
+# Railway Root Directory: Code/telegram-bot
+# Nixpacks defaults to Node 18 unless overridden.
+# Keep major version aligned with package.json engines + .nvmrc.
+
+[variables]
+NIXPACKS_NODE_VERSION = "22"
+NODE_ENV = "production"
+
+[start]
+cmd = "node api/server.js"

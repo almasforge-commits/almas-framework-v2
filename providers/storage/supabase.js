@@ -461,6 +461,8 @@ export function resetSupabaseClientForTests(env = process.env) {
  */
 export function logSupabaseStartupDiagnostics(log = console.log) {
   const status = getSupabaseEnvStatus();
+  const nodeMajor = Number.parseInt(String(process.versions.node || "").split(".")[0], 10);
+  log(`[supabase] nodeVersion=${process.versions.node || "unknown"}`);
   log(`[supabase] urlPresent=${status.urlPresent ? "true" : "false"}`);
   log(`[supabase] keyPresent=${status.keyPresent ? "true" : "false"}`);
   log(`[supabase] urlValid=${status.urlValid ? "true" : "false"}`);
@@ -480,6 +482,13 @@ export function logSupabaseStartupDiagnostics(log = console.log) {
     }
     if (status.errorMessage) {
       log(`[supabase] errorMessage=${status.errorMessage}`);
+    }
+    if (
+      Number.isFinite(nodeMajor) &&
+      nodeMajor < 22 &&
+      /websocket/i.test(String(status.errorMessage || ""))
+    ) {
+      log(`[supabase] hint=upgrade_runtime_to_node_22`);
     }
   }
 }

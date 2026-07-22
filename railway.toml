@@ -1,5 +1,11 @@
 # Railway / Render: run only the Mini App API (not Telegram bot polling).
 # Root Directory must be this package (Code/telegram-bot).
+#
+# Node version: Nixpacks defaults to 18. Pin Node 22 via:
+#   - package.json engines.node (>=22 <23)
+#   - .nvmrc / .node-version
+#   - nixpacks.toml NIXPACKS_NODE_VERSION=22
+# Required for @supabase/supabase-js native WebSocket (Node 22+).
 
 [build]
 builder = "NIXPACKS"

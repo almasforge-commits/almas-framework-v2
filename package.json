@@ -4,6 +4,9 @@
     "description": "Telegram Bot for ALMAS Framework",
     "main": "index.js",
     "type": "module",
+    "engines": {
+        "node": ">=22 <23"
+    },
     "scripts": {
         "start": "node index.js",
         "api": "node api/server.js",
