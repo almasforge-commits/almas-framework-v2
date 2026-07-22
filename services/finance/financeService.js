@@ -75,100 +75,104 @@ export async function getTransactions(limit = 20) {
   return data;
 }
 export async function getBalance(user_id = "default") {
-    const { data, error } = await supabase
-      .from("finance_transactions")
-      .select("type, amount, currency")
-      .eq("user_id", user_id);
-  
-    if (error) {
-      console.error(error);
-      return {};
-    }
-  
-    const result = {};
-  
-    for (const item of data) {
-      const currency = item.currency || "VND";
-  
-      if (!result[currency]) {
-        result[currency] = {
-          income: 0,
-          expense: 0,
-          balance: 0,
-        };
-      }
-  
-      if (item.type === "income") {
-        result[currency].income += Number(item.amount);
-      }
-  
-      if (item.type === "expense") {
-        result[currency].expense += Number(item.amount);
-      }
-  
-      result[currency].balance =
-        result[currency].income - result[currency].expense;
-    }
-  
-    return result;
+  const { data, error } = await supabase
+    .from("finance_transactions")
+    .select("type, amount, currency")
+    .eq("user_id", user_id);
+
+  if (error) {
+    console.error(error);
+    return {};
   }
-  export async function getHistory(user_id = "default", limit = 10) {
-    const { data, error } = await supabase
-      .from("finance_transactions")
-      .select("*")
-      .eq("user_id", user_id)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-  
-    if (error) {
-      console.error(error);
-      return [];
+
+  const result = {};
+  const rows = Array.isArray(data) ? data : [];
+
+  for (const item of rows) {
+    const currency = item.currency || "VND";
+
+    if (!result[currency]) {
+      result[currency] = {
+        income: 0,
+        expense: 0,
+        balance: 0,
+      };
     }
-  
-    return data;
+
+    if (item.type === "income") {
+      result[currency].income += Number(item.amount);
+    }
+
+    if (item.type === "expense") {
+      result[currency].expense += Number(item.amount);
+    }
+
+    result[currency].balance =
+      result[currency].income - result[currency].expense;
   }
-  export async function getStatistics(user_id = "default") {
-    const { data, error } = await supabase
-      .from("finance_transactions")
-      .select("*")
-      .eq("user_id", user_id);
-  
-    if (error) {
-      console.error(error);
-      return null;
-    }
-  
-    const stats = {
-      transactions: data.length,
-      expenses: {},
-      incomes: {},
-      biggestExpense: null,
-    };
-  
-    for (const item of data) {
-      const currency = item.currency || "VND";
-  
-      if (!stats.expenses[currency]) stats.expenses[currency] = 0;
-      if (!stats.incomes[currency]) stats.incomes[currency] = 0;
-  
-      if (item.type === "expense") {
-        stats.expenses[currency] += Number(item.amount);
-  
-        if (
-          !stats.biggestExpense ||
-          Number(item.amount) > Number(stats.biggestExpense.amount)
-        ) {
-          stats.biggestExpense = item;
-        }
-      }
-  
-      if (item.type === "income") {
-        stats.incomes[currency] += Number(item.amount);
-      }
-    }
-  
-    return stats;
+
+  return result;
+}
+
+export async function getHistory(user_id = "default", limit = 10) {
+  const { data, error } = await supabase
+    .from("finance_transactions")
+    .select("*")
+    .eq("user_id", user_id)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error(error);
+    return [];
   }
+
+  return Array.isArray(data) ? data : [];
+}
+
+export async function getStatistics(user_id = "default") {
+  const { data, error } = await supabase
+    .from("finance_transactions")
+    .select("*")
+    .eq("user_id", user_id);
+
+  if (error) {
+    console.error(error);
+    return null;
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const stats = {
+    transactions: rows.length,
+    expenses: {},
+    incomes: {},
+    biggestExpense: null,
+  };
+
+  for (const item of rows) {
+    const currency = item.currency || "VND";
+
+    if (!stats.expenses[currency]) stats.expenses[currency] = 0;
+    if (!stats.incomes[currency]) stats.incomes[currency] = 0;
+
+    if (item.type === "expense") {
+      stats.expenses[currency] += Number(item.amount);
+
+      if (
+        !stats.biggestExpense ||
+        Number(item.amount) > Number(stats.biggestExpense.amount)
+      ) {
+        stats.biggestExpense = item;
+      }
+    }
+
+    if (item.type === "income") {
+      stats.incomes[currency] += Number(item.amount);
+    }
+  }
+
+  return stats;
+}
   export async function getCategoryExpenses(user_id = "default", category) {
     const { data, error } = await supabase
       .from("finance_transactions")
@@ -197,35 +201,37 @@ export async function getBalance(user_id = "default") {
     return result;
   }
   export async function getExpensesByPeriod(user_id = "default", days = 30) {
-    const from = new Date();
-    from.setDate(from.getDate() - days);
-  
-    const { data, error } = await supabase
-      .from("finance_transactions")
-      .select("amount, currency")
-      .eq("user_id", user_id)
-      .eq("type", "expense")
-      .gte("created_at", from.toISOString());
-  
-    if (error) {
-      console.error(error);
-      return {};
+  const from = new Date();
+  from.setDate(from.getDate() - days);
+
+  const { data, error } = await supabase
+    .from("finance_transactions")
+    .select("amount, currency")
+    .eq("user_id", user_id)
+    .eq("type", "expense")
+    .gte("created_at", from.toISOString());
+
+  if (error) {
+    console.error(error);
+    return {};
+  }
+
+  const totals = {};
+  const rows = Array.isArray(data) ? data : [];
+
+  for (const item of rows) {
+    const currency = item.currency || "VND";
+
+    if (!totals[currency]) {
+      totals[currency] = 0;
     }
-  
-    const totals = {};
-  
-    for (const item of data) {
-      const currency = item.currency || "VND";
-  
-      if (!totals[currency]) {
-        totals[currency] = 0;
-      }
-  
-      totals[currency] += Number(item.amount);
-    }
-  
-    return totals;
-  }export async function getFinanceAnalytics(user_id = "default") {
+
+    totals[currency] += Number(item.amount);
+  }
+
+  return totals;
+}
+export async function getFinanceAnalytics(user_id = "default") {
 
     const { data, error } = await supabase
       .from("finance_transactions")

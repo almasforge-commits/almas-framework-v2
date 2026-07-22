@@ -1,10 +1,4 @@
 import "dotenv/config";
-import {
-  getBalance,
-  getHistory,
-  getExpensesByPeriod,
-  getStatistics,
-} from "../services/finance/financeService.js";
 import { listInboxItems } from "../providers/storage/supabaseInboxDriver.js";
 import { createApp } from "./createApp.js";
 import { createFinanceReader } from "./readers/financeReader.js";
@@ -24,6 +18,7 @@ import {
   botTokenFingerprint,
   normalizeBotToken,
 } from "./auth/validateInitData.js";
+import { logSupabaseStartupDiagnostics } from "../providers/storage/supabase.js";
 
 /**
  * Resolve listen host/port for local vs hosted runtimes.
@@ -58,10 +53,8 @@ export function buildDefaultApp(env = process.env) {
   }
 
   const financeReader = createFinanceReader({
-    getBalanceFn: getBalance,
-    getHistoryFn: getHistory,
-    getExpensesByPeriodFn: getExpensesByPeriod,
-    getStatisticsFn: getStatistics,
+    // Production path: financeStore → finance_transactions (same as bot writes).
+    log: (line) => console.error(String(line)),
   });
 
   const inboxReader = createInboxReader({
@@ -147,6 +140,7 @@ export function startServer(env = process.env) {
     console.log(`ALMAS API listening on http://${host}:${port}`);
     // Non-reversible ops check only — never log BOT_TOKEN itself.
     console.log(`[auth] botTokenFingerprint=${fingerprint}`);
+    logSupabaseStartupDiagnostics(console.log);
   });
 
   const shutdown = (signal) => {

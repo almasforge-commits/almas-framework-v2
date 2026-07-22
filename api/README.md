@@ -90,9 +90,34 @@ Query limits: `limit` default 20 max 100; `offset` default 0; `period` ∈ `toda
 
 POST/PUT/PATCH/DELETE are not registered.
 
-## Actor scoping (fail closed)
+## Finance reads
 
-- **Finance:** `user_id = String(telegramUserId)`
+Finance API reads `finance_transactions` with the same actor filter the bot uses:
+
+```
+.eq("user_id", String(telegramUserId))
+```
+
+Canonical Supabase env names (server only):
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+
+Startup logs (booleans only):
+
+```
+[supabase] urlPresent=true|false
+[supabase] keyPresent=true|false
+[supabase] clientCreated=true|false
+```
+
+Finance failures emit safe `[finance-api]` diagnostics (operation, period, rowCount, errorCode) — never keys, URLs, or row payloads.
+
+Local diagnostic:
+
+```bash
+node scripts/debug-finance-reader.js --user-id <telegramUserId> --period month
+```
 - **Inbox:** authoritative `actor_key = telegram:<id>` (+ optional `telegram_user_id`); does **not** depend on `INBOX_ENABLED`. `[]` only on successful empty query; read failures → `503`
 - **Tasks / Knowledge:** `[]` with internal reason `ownership_not_available` until ownership can be enforced at query level
 - **Dashboard:** aggregates only scoped reader outputs
